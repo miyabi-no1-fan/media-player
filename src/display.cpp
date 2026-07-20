@@ -13,27 +13,6 @@
 
 #include "utils.hpp"
 
-#define assert_gl()                                         \
-    {                                                       \
-        GLenum err = glGetError();                          \
-        if (err != GL_NO_ERROR) {                           \
-            switch (err) {                                  \
-                case GL_INVALID_ENUM:                       \
-                    panic("INVALID_ENUM");                  \
-                case GL_INVALID_VALUE:                      \
-                    panic("INVALID_VALUE");                 \
-                case GL_INVALID_OPERATION:                  \
-                    panic("INVALID_OPERATION");             \
-                case GL_OUT_OF_MEMORY:                      \
-                    panic("OUT_OF_MEMORY");                 \
-                case GL_INVALID_FRAMEBUFFER_OPERATION:      \
-                    panic("INVALID_FRAMEBUFFER_OPERATION"); \
-                default:                                    \
-                    panic("UNKNOWN ERROR");                 \
-            }                                               \
-        }                                                   \
-    }
-
 Window::Window(int width, int height, const char* title) {
     assert(this->window == NULL);
 
@@ -46,7 +25,9 @@ Window::Window(int width, int height, const char* title) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
+
+    glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
     GLFWwindow* window = glfwCreateWindow(width, height, title, NULL, NULL);
     if (window == NULL) {
@@ -59,10 +40,12 @@ Window::Window(int width, int height, const char* title) {
     glfwSwapInterval(1);
 
     if (gladLoadGL(glfwGetProcAddress) == 0) {
+        glfwDestroyWindow(this->window);
         glfwTerminate();
         throw this->Error::InitErr;
     }
 
+    /*
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
     glGenTextures(1, &this->rendererID);
@@ -72,7 +55,7 @@ Window::Window(int width, int height, const char* title) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-
+    */
     std::printf("%s\n", glGetString(GL_VERSION));
 
     assert_gl();
