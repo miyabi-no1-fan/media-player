@@ -1,12 +1,13 @@
 extern crate ffmpeg_next as ffmpeg;
 
 use std::{
-    sync::mpsc::{self, Receiver},
+    sync::{Arc, Condvar, Mutex},
     thread,
     time::Duration,
 };
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 use minifb::{Window, WindowOptions};
 
 // ffmpeg wrapper
@@ -31,6 +32,7 @@ fn main() -> Result<(), Error> {
     let mut decoder = decoder::Decoder::new(&file)?;
 
     let fps = decoder.frame_rate().round() as usize; // <- remember to round here
+    let frame_time = 1.0 / decoder.frame_rate();
     let width = decoder.width();
     let height = decoder.height();
 
@@ -50,23 +52,17 @@ fn main() -> Result<(), Error> {
     )?;
     window.set_target_fps(fps);
 
-    let (video_producer, video_consumer) = mpsc::sync_channel(60);
-    let (audio_producer, audio_consumer) = mpsc::sync_channel(60);
+    let (video_producer, video_consumer) = crossbeam_channel::unbounded();
+    let (audio_producer, audio_consumer) = crossbeam_channel::unbounded();
 
-    let audio = audio_init(audio_consumer).ok();
-    if let Some(audio) = audio.as_ref() {
-        let e = audio.stream.play();
-        if e.is_err() {
-            eprintln!("{e:#?}");
-        }
-    }
+    let condvar = Arc::new(Condvar::new());
+
+    let audio = audio_init(audio_consumer, Arc::clone(&condvar))?;
 
     let handle = {
-        let audio_config = if let Some(audio) = audio.as_ref() {
-            Some(audio.config.clone())
-        } else {
-            None
-        };
+        let audio_config = audio.config.clone();
+
+        let condvar = Arc::clone(&condvar);
 
         thread::spawn(move || -> Result<(), Error> {
             let mut formatter = decoder::Formatter::new(&decoder, audio_config)?;
@@ -88,6 +84,11 @@ fn main() -> Result<(), Error> {
                         }
                     }
                 }
+
+                while video_producer.len() > 4 && audio_producer.len() > 4 {
+                    let mtx = Mutex::new(());
+                    let _guard = condvar.wait(mtx.lock().unwrap()).unwrap();
+                }
             }
 
             Ok(())
@@ -99,18 +100,42 @@ fn main() -> Result<(), Error> {
 
     let mut is_paused = false; // for the pause video feature
 
+    let e = audio.stream.play();
+    if e.is_err() {
+        let e = e.unwrap_err();
+        if let Some(msg) = e.message() {
+            eprintln!("Audio Error: {msg}");
+        } else {
+            eprintln!("Audio Error: {:?}", e.kind());
+        }
+    }
+
     while window.is_open() {
         for key in window.get_keys_pressed(minifb::KeyRepeat::No).iter() {
             match key {
-                minifb::Key::Space => is_paused = !is_paused,
+                minifb::Key::Space => {
+                    is_paused = !is_paused;
+                    let e = audio.stream.pause();
+                    if e.is_err() {
+                        let e = e.unwrap_err();
+                        if let Some(msg) = e.message() {
+                            eprintln!("Audio Error: {msg}");
+                        } else {
+                            eprintln!("Audio Error: {:?}", e.kind());
+                        }
+                    }
+                }
                 _ => (),
             }
         }
 
         if !is_paused {
-            match video_consumer.recv_timeout(Duration::from_millis(1)) {
-                Ok(frame) => buf = frame.to_xrgb_vec(),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            match video_consumer.recv_timeout(Duration::from_secs_f64(frame_time / 2.0)) {
+                Ok(video) => {
+                    buf = video.to_xrgb_vec();
+                    condvar.notify_all();
+                }
+                Err(RecvTimeoutError::Timeout) => {}
                 Err(_) => break, // err = end of video
             }
         }
@@ -216,7 +241,10 @@ fn scaling(buf: &[u32], scalar: f64, width: usize, height: usize) -> (Vec<u32>, 
     return (scaled_buf, new_width, new_height);
 }
 
-fn audio_init(audio_consumer: Receiver<decoder::AudioFrame>) -> Result<Audio, Error> {
+fn audio_init(
+    audio_consumer: Receiver<decoder::AudioFrame>,
+    condvar: Arc<Condvar>,
+) -> Result<Audio, Error> {
     let host = cpal::default_host();
     let audio_device = host
         .default_output_device()
@@ -231,11 +259,12 @@ fn audio_init(audio_consumer: Receiver<decoder::AudioFrame>) -> Result<Audio, Er
         audio_config.into(),
         move |data: &mut [f32], _| {
             data.fill(0.0);
-            if let Ok(src) = audio_consumer.recv() {
+            if let Ok(src) = audio_consumer.recv_timeout(Duration::from_micros(100)) {
                 let src = src.data().as_chunks::<4>().0.iter().copied();
                 for (dst, src) in data.iter_mut().zip(src) {
                     *dst = f32::from_ne_bytes(src);
                 }
+                condvar.notify_all();
             }
         },
         |err| eprintln!("{err}"),

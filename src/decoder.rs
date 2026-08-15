@@ -4,6 +4,7 @@ use std::path::Path;
 pub enum Error {
     #[allow(dead_code)]
     FFmpegError(ffmpeg::Error),
+    UnsupportedConfig,
 }
 
 pub struct Decoder {
@@ -160,33 +161,21 @@ impl AudioFrame {
 }
 
 pub struct Formatter {
-    scaler: Option<ffmpeg::software::scaling::Context>,
-    resampler: Option<ffmpeg::software::resampling::Context>,
+    scaler: ffmpeg::software::scaling::Context,
+    resampler: ffmpeg::software::resampling::Context,
 }
 
 impl Formatter {
     pub fn new(
         decoder: &Decoder,
-        audio_config: Option<cpal::SupportedStreamConfig>,
+        audio_config: cpal::SupportedStreamConfig,
     ) -> Result<Self, Error> {
-        let resampler = match audio_config {
-            Some(config) => Some(ffmpeg::software::resampling::Context::get(
-                decoder.audio_decoder.format(),
-                decoder.audio_decoder.channel_layout(),
-                decoder.audio_decoder.rate(),
-                ffmpeg::format::Sample::F32(ffmpeg::util::format::sample::Type::Packed),
-                if config.channels() == 1 {
-                    ffmpeg::channel_layout::ChannelLayout::MONO
-                } else {
-                    ffmpeg::channel_layout::ChannelLayout::STEREO
-                },
-                config.sample_rate(),
-            )?),
-            None => None,
-        };
+        if audio_config.sample_format() != cpal::SampleFormat::F32 {
+            return Err(Error::UnsupportedConfig);
+        }
 
         Ok(Self {
-            scaler: Some(ffmpeg::software::scaling::Context::get(
+            scaler: ffmpeg::software::scaling::Context::get(
                 decoder.video_decoder.format(),
                 decoder.video_decoder.width(),
                 decoder.video_decoder.height(),
@@ -194,27 +183,32 @@ impl Formatter {
                 decoder.video_decoder.width(),
                 decoder.video_decoder.height(),
                 ffmpeg::software::scaling::flag::Flags::BILINEAR,
-            )?),
-            resampler,
+            )?,
+            resampler: ffmpeg::software::resampling::Context::get(
+                decoder.audio_decoder.format(),
+                decoder.audio_decoder.channel_layout(),
+                decoder.audio_decoder.rate(),
+                ffmpeg::format::Sample::F32(ffmpeg::util::format::sample::Type::Packed),
+                if audio_config.channels() == 1 {
+                    ffmpeg::channel_layout::ChannelLayout::MONO
+                } else {
+                    ffmpeg::channel_layout::ChannelLayout::STEREO
+                },
+                audio_config.sample_rate(),
+            )?,
         })
     }
 
     pub fn make_rgba8(&mut self, video: &mut VideoFrame) -> Result<(), Error> {
         let mut scaled_video = ffmpeg::frame::Video::empty();
-        self.scaler
-            .as_mut()
-            .expect("scaler should be Some")
-            .run(&video.video, &mut scaled_video)?;
+        self.scaler.run(&video.video, &mut scaled_video)?;
         video.video = scaled_video;
         Ok(())
     }
 
     pub fn resample(&mut self, audio: &mut AudioFrame) -> Result<(), Error> {
         let mut resampled_audio = ffmpeg::frame::Audio::empty();
-        self.resampler
-            .as_mut()
-            .expect("resampler should be Some")
-            .run(&audio.audio, &mut resampled_audio)?;
+        self.resampler.run(&audio.audio, &mut resampled_audio)?;
         audio.audio = resampled_audio;
         Ok(())
     }
