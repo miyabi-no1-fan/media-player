@@ -1,67 +1,98 @@
 extern crate ffmpeg_next as ffmpeg;
 
-use std::{sync::mpsc, thread};
+use std::{
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::Duration,
+};
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use minifb::{Window, WindowOptions};
 
 // ffmpeg wrapper
-mod video;
+mod decoder;
 
 #[allow(dead_code)]
 #[derive(Debug)]
 enum Error {
-    DecodeError(video::Error),
+    DecodeError(decoder::Error),
+    AudioError(cpal::ErrorKind),
     WindowError(minifb::Error),
+}
+
+pub struct Audio {
+    stream: cpal::Stream,
+    config: cpal::SupportedStreamConfig,
 }
 
 fn main() -> Result<(), Error> {
     let file = std::env::args().nth(1).expect("Cannot open file.");
 
-    // init a new decoder
-    let mut decoder = video::Decoder::new(&file)?;
+    let mut decoder = decoder::Decoder::new(&file)?;
 
     let fps = decoder.frame_rate().round() as usize; // <- remember to round here
     let width = decoder.width();
     let height = decoder.height();
 
-    // create new window
     let mut window = Window::new(
         format!("media-player -- Playing: {file}").as_str(),
         width,
         height,
         WindowOptions {
             scale: minifb::Scale::X1,
+            /* There's a scale mode `AspectRatioStretch`
+            From what tested, it did scale up
+            but it didn't center, so we use `Center` then do the scale up by ourself. */
             scale_mode: minifb::ScaleMode::Center,
             resize: true,
             ..WindowOptions::default()
         },
     )?;
-    /* There's a scale mode `AspectRatioStretch`
-    From what tested, it did scale up
-    but it didn't center, so we use `Center` then do the scale up by ourself. */
-
     window.set_target_fps(fps);
 
-    // channel between decoder thread and the main thread
-    // limit to only decode 4 frames ahead
-    let (sender, receiver) = mpsc::sync_channel::<video::Frame>(8);
+    let (video_producer, video_consumer) = mpsc::sync_channel(60);
+    let (audio_producer, audio_consumer) = mpsc::sync_channel(60);
 
-    // spawn decoder thread
-    let handle = thread::spawn(move || -> Result<(), Error> {
-        // initialize the scaler (converting other color formats into RGBA32)
-        let mut scaler = video::Scaler::new(&decoder)?;
-
-        while let Some(mut frame) = decoder.next()? {
-            scaler.run(&mut frame)?;
-            if sender.send(frame).is_err() {
-                // error happens because the main thread `drop(receiver)`
-                // this is not an error so we just need to return ok
-                return Ok(());
-            }
+    let audio = audio_init(audio_consumer).ok();
+    if let Some(audio) = audio.as_ref() {
+        let e = audio.stream.play();
+        if e.is_err() {
+            eprintln!("{e:#?}");
         }
+    }
 
-        Ok(())
-    });
+    let handle = {
+        let audio_config = if let Some(audio) = audio.as_ref() {
+            Some(audio.config.clone())
+        } else {
+            None
+        };
+
+        thread::spawn(move || -> Result<(), Error> {
+            let mut formatter = decoder::Formatter::new(&decoder, audio_config)?;
+
+            while let Some(frame) = decoder.next()? {
+                match frame {
+                    decoder::Frame::Video(mut video) => {
+                        formatter.make_rgba8(&mut video)?;
+                        if video_producer.send(video).is_err() {
+                            // error happens because the main thread `drop(receiver)`
+                            // this is not an error so we just need to return ok
+                            return Ok(());
+                        }
+                    }
+                    decoder::Frame::Audio(mut audio) => {
+                        formatter.resample(&mut audio)?;
+                        if audio_producer.send(audio).is_err() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            Ok(())
+        })
+    };
 
     // the current screen buffer -- needed for the pause feature to work
     let mut buf: Vec<u32> = vec![0u32; width * height];
@@ -76,10 +107,10 @@ fn main() -> Result<(), Error> {
             }
         }
 
-        // pull the next decoded frame if not paused
         if !is_paused {
-            match receiver.recv() {
+            match video_consumer.recv_timeout(Duration::from_millis(1)) {
                 Ok(frame) => buf = frame.to_xrgb_vec(),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(_) => break, // err = end of video
             }
         }
@@ -101,7 +132,7 @@ fn main() -> Result<(), Error> {
         the delta method is optimized in this case */
     }
 
-    drop(receiver); // drop the receiver so the decoder thread will quit
+    drop(video_consumer);
     handle.join().expect("decoder thread should not panic")?; // join to check for errors
 
     /* When exit, it always print:
@@ -132,7 +163,7 @@ fn main() -> Result<(), Error> {
     Ok(())
 }
 
-impl video::Frame {
+impl decoder::VideoFrame {
     fn to_xrgb_vec(&self) -> Vec<u32> {
         let mut buf = vec![0u32; self.height() * self.width()]; // RGBA8
         let mut buf_it = buf.iter_mut();
@@ -185,8 +216,40 @@ fn scaling(buf: &[u32], scalar: f64, width: usize, height: usize) -> (Vec<u32>, 
     return (scaled_buf, new_width, new_height);
 }
 
-impl From<video::Error> for Error {
-    fn from(value: video::Error) -> Self {
+fn audio_init(audio_consumer: Receiver<decoder::AudioFrame>) -> Result<Audio, Error> {
+    let host = cpal::default_host();
+    let audio_device = host
+        .default_output_device()
+        .ok_or(Error::AudioError(cpal::ErrorKind::DeviceNotAvailable))?;
+    let audio_config = audio_device.default_output_config()?;
+
+    if audio_config.sample_format() != cpal::SampleFormat::F32 {
+        return Err(Error::AudioError(cpal::ErrorKind::UnsupportedConfig));
+    }
+
+    let audio_stream = audio_device.build_output_stream(
+        audio_config.into(),
+        move |data: &mut [f32], _| {
+            data.fill(0.0);
+            if let Ok(src) = audio_consumer.recv() {
+                let src = src.data().as_chunks::<4>().0.iter().copied();
+                for (dst, src) in data.iter_mut().zip(src) {
+                    *dst = f32::from_ne_bytes(src);
+                }
+            }
+        },
+        |err| eprintln!("{err}"),
+        None,
+    )?;
+
+    Ok(Audio {
+        stream: audio_stream,
+        config: audio_config,
+    })
+}
+
+impl From<decoder::Error> for Error {
+    fn from(value: decoder::Error) -> Self {
         Self::DecodeError(value)
     }
 }
@@ -194,5 +257,11 @@ impl From<video::Error> for Error {
 impl From<minifb::Error> for Error {
     fn from(value: minifb::Error) -> Self {
         Self::WindowError(value)
+    }
+}
+
+impl From<cpal::Error> for Error {
+    fn from(value: cpal::Error) -> Self {
+        Self::AudioError(value.kind())
     }
 }
