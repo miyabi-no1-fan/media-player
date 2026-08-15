@@ -49,7 +49,7 @@ fn main() -> Result<(), Error> {
     // spawn decoder thread
     let handle = thread::spawn(move || -> Result<(), Error> {
         // initialize the scaler (converting other color formats into RGBA32)
-        let mut scaler = video::Scaler::new(&decoder)?;
+        let mut scaler = video::Formatter::new(&decoder)?;
 
         while let Some(mut frame) = decoder.next()? {
             scaler.run(&mut frame)?;
