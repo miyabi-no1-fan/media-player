@@ -126,6 +126,7 @@ impl Decoder {
             decoder.audio_decoder.send_eof().unwrap();
             Self::video_decode(&mut decoder.video_decoder, &mut scaler, &mut video_prod);
             Self::audio_decode(&mut decoder.audio_decoder, &mut resampler, &mut audio_prod);
+            Self::audio_flush(&mut resampler, &mut audio_prod);
         });
     }
 
@@ -134,8 +135,13 @@ impl Decoder {
         scaler: &mut ffmpeg::software::scaling::Context,
         video_prod: &mut ringbuf::HeapProd<frame::Video>,
     ) {
-        let mut decoded = frame::Video::empty();
-        while decoder.receive_frame(&mut decoded).is_ok() {
+        loop {
+            let mut decoded = frame::Video::empty();
+
+            if decoder.receive_frame(&mut decoded).is_err() {
+                break;
+            }
+
             let mut frame = frame::Video::empty();
             scaler.run(&decoded, &mut frame).unwrap();
 
@@ -145,8 +151,6 @@ impl Decoder {
                 frame = i;
                 thread::sleep(Duration::from_micros(10));
             }
-
-            decoded = frame::Video::empty();
         }
     }
 
@@ -155,10 +159,15 @@ impl Decoder {
         resampler: &mut ffmpeg::software::resampling::Context,
         audio_prod: &mut ringbuf::HeapProd<frame::Audio>,
     ) {
-        let mut decoded = frame::Audio::empty();
-        while decoder.receive_frame(&mut decoded).is_ok() {
+        loop {
+            let mut decoded = frame::Audio::empty();
+
+            if decoder.receive_frame(&mut decoded).is_err() {
+                break;
+            }
+
             let mut frame = frame::Audio::empty();
-            resampler.run(&decoded, &mut frame).unwrap();
+            let _ = resampler.run(&decoded, &mut frame).unwrap();
 
             while audio_prod.read_is_held()
                 && let Err(i) = audio_prod.try_push(frame)
@@ -166,8 +175,25 @@ impl Decoder {
                 frame = i;
                 thread::sleep(Duration::from_micros(10));
             }
+        }
+    }
 
-            decoded = frame::Audio::empty();
+    fn audio_flush(
+        resampler: &mut ffmpeg::software::resampling::Context,
+        audio_prod: &mut ringbuf::HeapProd<frame::Audio>,
+    ) {
+        let mut frame = frame::Audio::new(
+            resampler.output().format,
+            4096,
+            resampler.output().channel_layout,
+        );
+        let _ = resampler.flush(&mut frame).unwrap();
+
+        while audio_prod.read_is_held()
+            && let Err(i) = audio_prod.try_push(frame)
+        {
+            frame = i;
+            thread::sleep(Duration::from_micros(10));
         }
     }
 }

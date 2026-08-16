@@ -18,16 +18,16 @@ fn main() {
 
     let mut window = video::new_window(path.as_str(), fps, width, height);
 
-    let vbuf = ringbuf::HeapRb::new(4096);
+    let vbuf = ringbuf::HeapRb::new(65536);
     let (video_prod, mut video_cons) = vbuf.split();
 
-    let abuf = ringbuf::HeapRb::new(4096);
+    let abuf = ringbuf::HeapRb::new(65536);
     let (audio_prod, audio_cons) = abuf.split();
 
-    let (audio_stream, audio_config) = audio::audio_init(audio_cons, audio::InitOpts::Best);
+    let (audio_stream, audio_config) = audio::audio_init(audio_cons, audio::InitOpts::Default);
     Decoder::decode(decoder, audio_config, video_prod, audio_prod);
 
-    thread::sleep(Duration::from_millis(10)); // waiting for decoder to init
+    thread::sleep(Duration::from_millis(100)); // waiting for decoder to init
     audio_stream.play().unwrap();
     let mut buf: Vec<u32> = vec![0u32; width * height];
 
