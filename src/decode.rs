@@ -91,15 +91,7 @@ impl Decoder {
                 decoder.audio_decoder.channel_layout(),
                 decoder.audio_decoder.rate(),
                 audio_config.sample_format().as_ffmpeg_sample(),
-                if decoder.audio_decoder.channels() == audio_config.channels() {
-                    decoder.audio_decoder.channel_layout()
-                } else {
-                    match audio_config.channels() {
-                        1 => ChannelLayout::MONO,
-                        2 => ChannelLayout::STEREO,
-                        _ => todo!(), // TODO: handle other cases
-                    }
-                },
+                ChannelLayout::default(audio_config.channels().into()),
                 audio_config.sample_rate(),
             )
             .unwrap();
@@ -151,7 +143,7 @@ impl Decoder {
                 && let Err(i) = video_prod.try_push(frame)
             {
                 frame = i;
-                thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_micros(10));
             }
 
             decoded = frame::Video::empty();
@@ -172,7 +164,7 @@ impl Decoder {
                 && let Err(i) = audio_prod.try_push(frame)
             {
                 frame = i;
-                thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_micros(10));
             }
 
             decoded = frame::Audio::empty();

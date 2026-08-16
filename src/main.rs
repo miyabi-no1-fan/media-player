@@ -24,7 +24,7 @@ fn main() {
     let abuf = ringbuf::HeapRb::new(4096);
     let (audio_prod, audio_cons) = abuf.split();
 
-    let (audio_stream, audio_config) = audio::audio_init(audio_cons);
+    let (audio_stream, audio_config) = audio::audio_init(audio_cons, audio::InitOpts::Best);
     Decoder::decode(decoder, audio_config, video_prod, audio_prod);
 
     thread::sleep(Duration::from_millis(10)); // waiting for decoder to init
