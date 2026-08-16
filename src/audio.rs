@@ -1,13 +1,13 @@
 extern crate ffmpeg_next as ffmpeg;
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, thread, time::Duration};
 
 use cpal::{
     SampleFormat,
     traits::{DeviceTrait, HostTrait},
 };
 use ffmpeg::frame;
-use ringbuf::traits::Consumer;
+use ringbuf::traits::{Consumer, Observer};
 
 pub fn audio_init(
     consumer: ringbuf::HeapCons<frame::Audio>,
@@ -44,7 +44,8 @@ where
         .build_output_stream(
             config,
             move |data: &mut [T], _| {
-                if queue.len() < data.len() {
+                while queue.len() < data.len() && (!consumer.is_empty() || consumer.write_is_held())
+                {
                     for audio in consumer.pop_iter() {
                         queue.extend(unsafe {
                             std::slice::from_raw_parts(
@@ -52,6 +53,9 @@ where
                                 audio.samples() * audio.channels() as usize,
                             )
                         });
+                    }
+                    if queue.len() < data.len() {
+                        thread::sleep(Duration::from_micros(10));
                     }
                 }
 

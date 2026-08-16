@@ -10,6 +10,7 @@ use ffmpeg::format;
 use ffmpeg::format::sample::Type as SampleType;
 use ffmpeg::frame;
 use ffmpeg::media;
+use ringbuf::traits::Observer;
 use ringbuf::traits::Producer;
 
 pub struct Decoder {
@@ -95,7 +96,8 @@ impl Decoder {
                 } else {
                     match audio_config.channels() {
                         1 => ChannelLayout::MONO,
-                        _ => ChannelLayout::STEREO,
+                        2 => ChannelLayout::STEREO,
+                        _ => todo!(), // TODO: handle other cases
                     }
                 },
                 audio_config.sample_rate(),
@@ -122,7 +124,16 @@ impl Decoder {
                     }
                     _ => {}
                 }
+
+                if !video_prod.read_is_held() || !audio_prod.read_is_held() {
+                    return;
+                }
             }
+
+            decoder.video_decoder.send_eof().unwrap();
+            decoder.audio_decoder.send_eof().unwrap();
+            Self::video_decode(&mut decoder.video_decoder, &mut scaler, &mut video_prod);
+            Self::audio_decode(&mut decoder.audio_decoder, &mut resampler, &mut audio_prod);
         });
     }
 
@@ -136,7 +147,9 @@ impl Decoder {
             let mut frame = frame::Video::empty();
             scaler.run(&decoded, &mut frame).unwrap();
 
-            while let Err(i) = video_prod.try_push(decoded) {
+            while video_prod.read_is_held()
+                && let Err(i) = video_prod.try_push(decoded)
+            {
                 decoded = i;
                 thread::sleep(Duration::from_millis(1));
             }
@@ -155,7 +168,9 @@ impl Decoder {
             let mut frame = frame::Audio::empty();
             resampler.run(&decoded, &mut frame).unwrap();
 
-            while let Err(i) = audio_prod.try_push(decoded) {
+            while audio_prod.read_is_held()
+                && let Err(i) = audio_prod.try_push(decoded)
+            {
                 decoded = i;
                 thread::sleep(Duration::from_millis(1));
             }
