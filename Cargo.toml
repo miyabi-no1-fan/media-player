@@ -5,6 +5,12 @@ edition = "2024"
 
 [dependencies]
 cpal = "0.18.1"
-crossbeam-channel = "0.5.16"
 ffmpeg-next = "9.0.0"
 minifb = "0.28.0"
+ringbuf = "0.5.1"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
