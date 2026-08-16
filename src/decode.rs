@@ -148,9 +148,9 @@ impl Decoder {
             scaler.run(&decoded, &mut frame).unwrap();
 
             while video_prod.read_is_held()
-                && let Err(i) = video_prod.try_push(decoded)
+                && let Err(i) = video_prod.try_push(frame)
             {
-                decoded = i;
+                frame = i;
                 thread::sleep(Duration::from_millis(1));
             }
 
@@ -169,9 +169,9 @@ impl Decoder {
             resampler.run(&decoded, &mut frame).unwrap();
 
             while audio_prod.read_is_held()
-                && let Err(i) = audio_prod.try_push(decoded)
+                && let Err(i) = audio_prod.try_push(frame)
             {
-                decoded = i;
+                frame = i;
                 thread::sleep(Duration::from_millis(1));
             }
 
