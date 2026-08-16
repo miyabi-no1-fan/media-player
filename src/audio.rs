@@ -1,6 +1,11 @@
 extern crate ffmpeg_next as ffmpeg;
 
-use std::{collections::VecDeque, thread, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+    thread,
+    time::Duration,
+};
 
 use cpal::{
     SampleFormat,
@@ -82,73 +87,66 @@ where
 fn cpal_init(opts: InitOpts) -> (cpal::Device, cpal::SupportedStreamConfig) {
     let host = cpal::default_host();
 
-    let mut best: (cpal::Device, cpal::SupportedStreamConfig) = {
-        let dev = host.default_output_device().unwrap();
-        let conf = dev.default_output_config().unwrap();
-        (dev, conf)
-    };
+    let mut best_device = host.default_output_device().unwrap();
+    let default_conf = best_device.default_output_config().unwrap();
 
     match opts {
-        InitOpts::Default => return best,
+        InitOpts::Default => return (best_device, default_conf),
         _ => {}
     }
 
     let devices = host.output_devices().unwrap();
+    let mut best_conf_range = best_device
+        .supported_output_configs()
+        .unwrap()
+        .next()
+        .unwrap();
     for device in devices {
         if let Ok(configs) = device.supported_output_configs() {
             for config in configs {
-                let config = config.with_max_sample_rate();
-                if config_score(config) > config_score(best.1) {
-                    if try_build_audio(&device, config).is_some() {
-                        best = (device.to_owned(), config);
+                if config.cmp_default_heuristics(&best_conf_range).is_gt() {
+                    if try_build_audio(&device, config.with_standard_sample_rate()) {
+                        best_device = device.clone();
+                        best_conf_range = config;
                     }
                 }
             }
         };
     }
 
-    best
+    (best_device, best_conf_range.with_standard_sample_rate())
 }
 
-fn config_score(config: cpal::SupportedStreamConfig) -> (u32, u16, u32) {
-    (
-        config.sample_rate(),
-        config.channels(),
+fn try_build_audio(device: &cpal::Device, config: cpal::SupportedStreamConfig) -> bool {
+    let err = Arc::new(Mutex::new(false));
+    let res = {
+        let err = err.clone();
+        let errfn = move |_| *err.lock().unwrap() = false;
         match config.sample_format() {
-            SampleFormat::U8 => 1,
-            SampleFormat::I16 => 2,
-            SampleFormat::I32 => 3,
-            // SampleFormat::I64 => 4,
-            SampleFormat::F32 => 5,
-            SampleFormat::F64 => 6,
-            _ => 0,
-        },
-    )
-}
-
-fn try_build_audio(
-    device: &cpal::Device,
-    config: cpal::SupportedStreamConfig,
-) -> Option<cpal::Stream> {
-    match config.sample_format() {
-        SampleFormat::U8 => device
-            .build_output_stream(config.into(), move |_: &mut [u8], _| {}, |_| {}, None)
-            .ok(),
-        SampleFormat::I16 => device
-            .build_output_stream(config.into(), move |_: &mut [i16], _| {}, |_| {}, None)
-            .ok(),
-        SampleFormat::I32 => device
-            .build_output_stream(config.into(), move |_: &mut [i32], _| {}, |_| {}, None)
-            .ok(),
-        SampleFormat::I64 => device
-            .build_output_stream(config.into(), move |_: &mut [i64], _| {}, |_| {}, None)
-            .ok(),
-        SampleFormat::F32 => device
-            .build_output_stream(config.into(), move |_: &mut [f32], _| {}, |_| {}, None)
-            .ok(),
-        SampleFormat::F64 => device
-            .build_output_stream(config.into(), move |_: &mut [f64], _| {}, |_| {}, None)
-            .ok(),
-        _ => None,
+            SampleFormat::U8 => device
+                .build_output_stream(config.into(), |_: &mut [u8], _| {}, errfn, None)
+                .ok(),
+            SampleFormat::I16 => device
+                .build_output_stream(config.into(), |_: &mut [i16], _| {}, errfn, None)
+                .ok(),
+            SampleFormat::I32 => device
+                .build_output_stream(config.into(), |_: &mut [i32], _| {}, errfn, None)
+                .ok(),
+            SampleFormat::I64 => device
+                .build_output_stream(config.into(), |_: &mut [i64], _| {}, errfn, None)
+                .ok(),
+            SampleFormat::F32 => device
+                .build_output_stream(config.into(), |_: &mut [f32], _| {}, errfn, None)
+                .ok(),
+            SampleFormat::F64 => device
+                .build_output_stream(config.into(), |_: &mut [f64], _| {}, errfn, None)
+                .ok(),
+            _ => None,
+        }
+    };
+    if res.is_some() && !*err.lock().unwrap() {
+        true
+    } else {
+        false
     }
 }
