@@ -182,18 +182,24 @@ impl Decoder {
         resampler: &mut ffmpeg::software::resampling::Context,
         audio_prod: &mut ringbuf::HeapProd<frame::Audio>,
     ) {
-        let mut frame = frame::Audio::new(
-            resampler.output().format,
-            4096,
-            resampler.output().channel_layout,
-        );
-        let _ = resampler.flush(&mut frame).unwrap();
+        loop {
+            let mut frame = frame::Audio::new(
+                resampler.output().format,
+                0, // flush will allocate
+                resampler.output().channel_layout,
+            );
+            let _ = resampler.flush(&mut frame).unwrap();
 
-        while audio_prod.read_is_held()
-            && let Err(i) = audio_prod.try_push(frame)
-        {
-            frame = i;
-            thread::sleep(Duration::from_micros(10));
+            if frame.samples() == 0 {
+                break;
+            }
+
+            while audio_prod.read_is_held()
+                && let Err(i) = audio_prod.try_push(frame)
+            {
+                frame = i;
+                thread::sleep(Duration::from_micros(10));
+            }
         }
     }
 }
