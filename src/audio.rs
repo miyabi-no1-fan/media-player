@@ -105,7 +105,7 @@ fn cpal_init(opts: InitOpts) -> (cpal::Device, cpal::SupportedStreamConfig) {
         if let Ok(configs) = device.supported_output_configs() {
             for config in configs {
                 if config.cmp_default_heuristics(&best_conf_range).is_gt() {
-                    if try_build_audio(&device, config.with_standard_sample_rate()) {
+                    if try_build_audio(&device, config.with_max_sample_rate()) {
                         best_device = device.clone();
                         best_conf_range = config;
                     }
@@ -114,7 +114,7 @@ fn cpal_init(opts: InitOpts) -> (cpal::Device, cpal::SupportedStreamConfig) {
         };
     }
 
-    (best_device, best_conf_range.with_standard_sample_rate())
+    (best_device, best_conf_range.with_max_sample_rate())
 }
 
 fn try_build_audio(device: &cpal::Device, config: cpal::SupportedStreamConfig) -> bool {
