@@ -74,7 +74,11 @@ impl Decoder {
                 decoder.video_decoder.format(),
                 decoder.video_decoder.width(),
                 decoder.video_decoder.height(),
-                format::Pixel::ZRGB32,
+                if is_little_endian() {
+                    format::Pixel::BGRZ
+                } else {
+                    format::Pixel::ZRGB
+                }, // somehow, ZRGB32 does not work
                 decoder.video_decoder.width(),
                 decoder.video_decoder.height(),
                 ffmpeg::software::scaling::flag::Flags::BILINEAR,
@@ -130,7 +134,7 @@ impl Decoder {
         let mut decoded = frame::Video::empty();
         while decoder.receive_frame(&mut decoded).is_ok() {
             let mut frame = frame::Video::empty();
-            let _ = scaler.run(&decoded, &mut frame);
+            scaler.run(&decoded, &mut frame).unwrap();
 
             while let Err(i) = video_prod.try_push(decoded) {
                 decoded = i;
@@ -177,4 +181,9 @@ impl SampleFormatConversion for cpal::SampleFormat {
             _ => panic!("Unsupported Sample Format"),
         }
     }
+}
+
+fn is_little_endian() -> bool {
+    let v: u16 = 1;
+    v.to_ne_bytes()[0] != 0
 }
