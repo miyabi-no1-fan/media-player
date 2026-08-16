@@ -55,15 +55,14 @@ where
             move |data: &mut [T], _| {
                 while queue.len() < data.len() && (!consumer.is_empty() || consumer.write_is_held())
                 {
-                    for audio in consumer.pop_iter() {
+                    if let Some(audio) = consumer.try_pop() {
                         queue.extend(unsafe {
                             std::slice::from_raw_parts(
                                 audio.data(0).as_ptr() as *const T,
                                 audio.samples() * audio.channels() as usize,
                             )
                         });
-                    }
-                    if queue.len() < data.len() {
+                    } else {
                         thread::sleep(Duration::from_micros(10));
                     }
                 }
