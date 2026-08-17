@@ -21,6 +21,10 @@ pub struct Decoder {
 }
 
 impl Decoder {
+    /// ### Usage:
+    /// ```rust
+    /// let (decoder, fps, width, height) = Decoder::new(&path);
+    /// ```
     pub fn new<P>(path: &P) -> (Self, f64, u32, u32)
     where
         P: AsRef<std::path::Path> + ?Sized,

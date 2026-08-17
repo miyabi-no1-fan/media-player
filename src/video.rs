@@ -44,6 +44,11 @@ pub struct Video {
 }
 
 impl Video {
+    /// Create a new `Video` to handle video rendering.
+    /// ### Usage
+    /// ```rust
+    /// let mut video = Video::new(width, height, fps, video_cons);
+    /// ```
     pub fn new(width: u32, height: u32, fps: usize, consumer: Receiver<frame::Video>) -> Self {
         assert!(width <= WIDTH_LIMIT as u32);
         assert!(height <= HEIGHT_LIMIT as u32);
@@ -57,6 +62,7 @@ impl Video {
         }
     }
 
+    /// **Try** to pause the video
     pub fn pause(&mut self, audio_stream: &cpal::Stream) {
         if self.is_paused {
             audio_stream.play().unwrap();
@@ -68,6 +74,13 @@ impl Video {
         }
     }
 
+    /// pull frame from decoder -> scale the frame -> display -> return `window.is_open()`
+    /// ### Usage
+    /// ```rust
+    /// while video.update(&mut window) {
+    ///     /* handle keyboard inputs */
+    /// }
+    /// ```
     pub fn update(&mut self, window: &mut Window) -> bool {
         if self.should_update() {
             if self.pull_frame().is_none() {

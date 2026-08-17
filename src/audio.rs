@@ -24,6 +24,10 @@ pub enum InitOpts {
 ///
 /// `InitOpts::Best` will try to find the best device
 /// with the best config using `cpal`'s `cmp_default_heuristics`
+/// ### Usage
+/// ```rust
+/// let (audio_stream, audio_config) = audio_init(audio_consumer, InitOpts::Default);
+/// ```
 pub fn audio_init(
     consumer: Receiver<frame::Audio>,
     init_opts: InitOpts,
