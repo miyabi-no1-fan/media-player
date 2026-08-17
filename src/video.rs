@@ -1,5 +1,8 @@
-extern crate ffmpeg_next as ffmpeg;
+use std::time::Duration;
 
+use cpal::traits::StreamTrait;
+use crossbeam_channel::{Receiver, RecvTimeoutError};
+use ffmpeg::frame;
 use minifb::{Window, WindowOptions};
 
 pub fn new_window(path: &str, fps: usize, width: usize, height: usize) -> Window {
@@ -22,10 +25,80 @@ pub fn new_window(path: &str, fps: usize, width: usize, height: usize) -> Window
     window
 }
 
+#[derive(Debug, Clone)]
+pub struct Video {
+    buf: Vec<u32>,
+    width: usize,
+    height: usize,
+
+    frame_time: f64,
+
+    consumer: Receiver<frame::Video>,
+
+    is_paused: bool,
+}
+
+impl Video {
+    pub fn new(width: usize, height: usize, fps: usize, consumer: Receiver<frame::Video>) -> Self {
+        Self {
+            buf: vec![0u32; width * height],
+            width,
+            height,
+            frame_time: 1.0 / fps as f64,
+            consumer,
+            is_paused: false,
+        }
+    }
+
+    pub fn pause(&mut self, audio_stream: &cpal::Stream) {
+        if self.is_paused {
+            audio_stream.play().unwrap();
+            self.is_paused = false;
+        } else {
+            if audio_stream.pause().is_ok() {
+                self.is_paused = true;
+            }
+        }
+    }
+
+    pub fn update(&mut self, window: &mut Window) -> bool {
+        if self.should_update() {
+            if self.pull_frame().is_none() {
+                return false;
+            }
+        }
+
+        let (scaled_buf, scaled_width, scaled_height) =
+            scale_to_fit(window, &self.buf, self.width, self.height);
+        window
+            .update_with_buffer(&scaled_buf, scaled_width, scaled_height)
+            .unwrap();
+
+        window.is_open()
+    }
+
+    /// Return None if there's no more frame to pull
+    fn pull_frame(&mut self) -> Option<()> {
+        match self
+            .consumer
+            .recv_timeout(Duration::from_secs_f64(self.frame_time / 2.0))
+        {
+            Ok(video) => self.buf = video_frame_to_vec(&video),
+            Err(RecvTimeoutError::Timeout) => {} // play the old frame if timeout
+            _ => return None,
+        }
+        Some(())
+    }
+
+    fn should_update(&self) -> bool {
+        !self.is_paused
+    }
+}
+
 /// Assume frame is 0RGB.
 ///
 /// Return **0RGB32 packed** Vec (required by minifb)
-pub fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
+fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
     let mut buf = vec![0u32; video.height() as usize * video.width() as usize];
 
     for (dst_row, src_row) in buf
@@ -49,7 +122,7 @@ pub fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
 /// ```rust
 /// let (scaled_buf, new_width, new_height) = scale_to_fit(window, &buf, width, height);
 /// ```
-pub fn scale_to_fit(
+fn scale_to_fit(
     window: &Window,
     buf: &[u32],
     width: usize,

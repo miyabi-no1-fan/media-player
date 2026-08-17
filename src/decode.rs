@@ -1,5 +1,3 @@
-extern crate ffmpeg_next as ffmpeg;
-
 use std::thread;
 use std::time::Duration;
 

@@ -1,13 +1,15 @@
+extern crate ffmpeg_next as ffmpeg;
+
 use std::{thread, time::Duration};
 
 use cpal::traits::StreamTrait;
-use crossbeam_channel::RecvTimeoutError;
+use minifb::{Key, KeyRepeat};
 
-use crate::decode::Decoder;
+use crate::{decode::Decoder, video::Video};
 
 mod audio; // cpal
 mod decode; // ffmpeg
-mod video; // video proccessing
+mod video; // minifb
 
 fn main() {
     let path = std::env::args().nth(1).expect("Cannot open file.");
@@ -36,20 +38,14 @@ fn main() {
 
     audio_stream.play().unwrap();
 
-    let mut buf: Vec<u32> = vec![0u32; width * height];
+    let mut video = Video::new(width, height, fps, video_cons);
 
-    while window.is_open() {
-        match video_cons.recv_timeout(Duration::from_millis(1)) {
-            Ok(video) => buf = video::video_frame_to_vec(&video),
-            Err(RecvTimeoutError::Timeout) => {} // play the old frame if timeout
-            _ => break,
+    while video.update(&mut window) {
+        for key in window.get_keys_pressed(KeyRepeat::No).iter() {
+            match key {
+                Key::Space => video.pause(&audio_stream),
+                _ => {}
+            }
         }
-
-        let (scaled_buf, scaled_width, scaled_height) =
-            video::scale_to_fit(&window, &buf, width, height);
-
-        window
-            .update_with_buffer(&scaled_buf, scaled_width, scaled_height)
-            .unwrap();
     }
 }
