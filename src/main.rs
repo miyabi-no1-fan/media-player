@@ -32,6 +32,8 @@ fn main() {
         }
     };
 
+    // TODO: parse input args for options like -h etc
+
     match run(path) {
         Ok(()) => {}
         Err(msg) => {
