@@ -5,9 +5,9 @@ use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
 use minifb::{Window, WindowOptions};
 
-use crate::{FPS_LIMIT, HEIGHT_LIMIT, WIDTH_LIMIT};
+use crate::{Error, FPS_LIMIT, HEIGHT_LIMIT, WIDTH_LIMIT};
 
-pub fn new_window(path: &str, fps: usize, width: u32, height: u32) -> Window {
+pub fn new_window(path: &str, fps: usize, width: u32, height: u32) -> Result<Window, Error> {
     assert!(width <= WIDTH_LIMIT as u32);
     assert!(height <= HEIGHT_LIMIT as u32);
     assert!(fps <= FPS_LIMIT);
@@ -24,10 +24,9 @@ pub fn new_window(path: &str, fps: usize, width: u32, height: u32) -> Window {
             resize: true,
             ..WindowOptions::default()
         },
-    )
-    .unwrap();
+    )?;
     window.set_target_fps(fps);
-    window
+    Ok(window)
 }
 
 #[derive(Debug, Clone)]
@@ -63,38 +62,42 @@ impl Video {
     }
 
     /// **Try** to pause the video
-    pub fn pause(&mut self, audio_stream: &cpal::Stream) {
+    pub fn pause(&mut self, audio_stream: &cpal::Stream) -> Result<(), Error> {
         if self.is_paused {
-            audio_stream.play().unwrap();
+            audio_stream.play()?;
             self.is_paused = false;
         } else {
-            if audio_stream.pause().is_ok() {
-                self.is_paused = true;
-            }
+            self.is_paused = true;
+            audio_stream.pause()?;
         }
+        Ok(())
     }
 
-    /// pull frame from decoder -> scale the frame -> display -> return `window.is_open()`
+    /// pull frame from decoder -> scale the frame -> display -> return `Ok(window.is_open())`
+    /// ### Notice
+    /// `update` will not update anything if it's paused or `recv` timeout.
+    ///
+    /// `update` will return Ok(false) if
+    ///     - `window.is_open()` return false
+    ///     - `recv` return error (usually because all producer dropped and queue is empty)
     /// ### Usage
     /// ```rust
-    /// while video.update(&mut window) {
+    /// while video.update(&mut window)? {
     ///     /* handle keyboard inputs */
     /// }
     /// ```
-    pub fn update(&mut self, window: &mut Window) -> bool {
+    pub fn update(&mut self, window: &mut Window) -> Result<bool, Error> {
         if self.should_update() {
             if self.pull_frame().is_none() {
-                return false;
+                return Ok(false);
             }
         }
 
         let (scaled_buf, scaled_width, scaled_height) =
             scale_to_fit(window, &self.buf, self.width, self.height);
-        window
-            .update_with_buffer(&scaled_buf, scaled_width as usize, scaled_height as usize)
-            .unwrap();
+        window.update_with_buffer(&scaled_buf, scaled_width as usize, scaled_height as usize)?;
 
-        window.is_open()
+        Ok(window.is_open())
     }
 
     /// Return None if there's no more frame to pull
