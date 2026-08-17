@@ -77,9 +77,9 @@ impl Video {
     /// ### Notice
     /// `update` will not update anything if it's paused or `recv` timeout.
     ///
-    /// `update` will return Ok(false) if
-    ///     - `window.is_open()` return false
-    ///     - `recv` return error (usually because all producer dropped and queue is empty)
+    /// return `Ok(false)` if `recv` return error
+    ///
+    /// return `Err(Error::Exit)` if `window.is_open()` is false
     /// ### Usage
     /// ```rust
     /// while video.update(&mut window)? {
@@ -97,7 +97,11 @@ impl Video {
             scale_to_fit(window, &self.buf, self.width, self.height);
         window.update_with_buffer(&scaled_buf, scaled_width as usize, scaled_height as usize)?;
 
-        Ok(window.is_open())
+        if window.is_open() {
+            Ok(true)
+        } else {
+            Err(Error::Exit)
+        }
     }
 
     /// Return None if there's no more frame to pull
