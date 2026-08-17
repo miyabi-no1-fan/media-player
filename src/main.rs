@@ -3,7 +3,7 @@ extern crate ffmpeg_next as ffmpeg;
 use std::{thread, time::Duration};
 
 use cpal::traits::StreamTrait;
-use minifb::{Key, KeyRepeat};
+use minifb::{Key, KeyRepeat, Window};
 
 use crate::{decode::Decoder, video::Video};
 
@@ -21,29 +21,82 @@ enum Error {
     Decode(ffmpeg::Error),
     Audio(cpal::Error),
     Window(minifb::Error),
+    /// indicate that the app should exit
+    Exit,
+}
+
+fn help() {
+    println!("media-player\nUsage: media-player [media file]");
+    println!("Options:");
+    println!("--help | -h          Print the this help description.");
+    println!("--repeat | -r [v]    How many times to repeat the video, v must be > 0");
+    println!("                     run again forever if v == 0");
 }
 
 fn main() {
-    let path = match std::env::args().nth(1) {
-        Some(v) => v,
-        None => {
-            eprintln!("Cannot open file");
-            return;
+    let mut path: Option<String> = None;
+    let mut repeat = 1;
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        help();
+        std::process::exit(1);
+    }
+
+    let mut args = args[1..].iter().cloned();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--help" | "-h" => {
+                help();
+                return;
+            }
+            "--repeat" | "-r" => {
+                let Some(v) = args.next() else {
+                    eprintln!("Invalid argument. Expect a positive number after {arg} flag");
+                    std::process::exit(1);
+                };
+                let Ok(num) = v.parse::<u32>() else {
+                    eprintln!("Invalid argument. Expect a positive number after {arg} flag");
+                    std::process::exit(1);
+                };
+                if num == 0 {
+                    // run again forever was a lie
+                    repeat = usize::MAX;
+                } else {
+                    repeat = num as usize;
+                }
+            }
+            _ if path.is_none() => path = Some(arg),
+            _ => {
+                eprintln!("Invalid argument. Unknown argument");
+                help();
+                std::process::exit(1);
+            }
         }
+    }
+
+    let Some(path) = path else {
+        eprintln!("Invalid argument. Expect a file to open.");
+        std::process::exit(1);
     };
 
-    // TODO: parse input args for options like -h etc
+    let mut window = None;
 
-    match run(path) {
-        Ok(()) => {}
-        Err(msg) => {
-            eprintln!("{:?}", msg);
-            return;
+    for _ in 0..repeat {
+        window = match run(path.clone(), window) {
+            Ok(window) => Some(window),
+            Err(err) => match err {
+                Error::Exit => break,
+                err => {
+                    eprintln!("{err:?}");
+                    std::process::exit(1);
+                }
+            },
         }
     }
 }
 
-fn run(path: String) -> Result<(), Error> {
+fn run(path: String, window: Option<Window>) -> Result<Window, Error> {
     // We're expecting both the audio and the video to exist.
     // TODO: Handle the audio/video only case.
 
@@ -56,7 +109,7 @@ fn run(path: String) -> Result<(), Error> {
     let (audio_prod, audio_cons) = crossbeam_channel::unbounded();
 
     let (audio_stream, audio_config) =
-        audio::audio_init(audio_cons.clone(), audio::InitOpts::Best)?;
+        audio::audio_init(audio_cons.clone(), audio::InitOpts::Default)?;
 
     let handle = Decoder::decode(decoder, audio_config, video_prod, audio_prod);
 
@@ -66,7 +119,11 @@ fn run(path: String) -> Result<(), Error> {
     }
     drop(audio_cons); // unused here so drop early
 
-    let mut window = video::new_window(path.as_str(), fps, width, height)?;
+    let mut window = match window {
+        Some(w) => w,
+        None => video::new_window(path.as_str(), fps, width, height)?,
+    };
+
     let mut video = Video::new(width, height, fps, video_cons);
 
     audio_stream.play()?;
@@ -89,7 +146,7 @@ fn run(path: String) -> Result<(), Error> {
         .join()
         .expect("Couldn't join on the associated thread")?;
 
-    Ok(())
+    Ok(window)
 }
 
 impl From<ffmpeg::Error> for Error {
@@ -117,6 +174,7 @@ impl std::fmt::Debug for Error {
             Self::Decode(e) => write!(f, "Decode Error: {e:?}"),
             Self::Window(e) => write!(f, "Window Error: {e:?}"),
             Self::Audio(e) => write!(f, "Audio Error: {e:?}"),
+            Self::Exit => panic!("Idiot, why would you print this error?"),
         }
     }
 }
