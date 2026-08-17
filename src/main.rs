@@ -1,13 +1,13 @@
 use std::{thread, time::Duration};
 
 use cpal::traits::StreamTrait;
-use ringbuf::traits::{Consumer, Observer, Split};
+use crossbeam_channel::RecvTimeoutError;
 
 use crate::decode::Decoder;
 
-mod audio;
-mod decode;
-mod video;
+mod audio; // cpal
+mod decode; // ffmpeg
+mod video; // video proccessing
 
 fn main() {
     let path = std::env::args().nth(1).expect("Cannot open file.");
@@ -18,27 +18,31 @@ fn main() {
 
     let mut window = video::new_window(path.as_str(), fps, width, height);
 
-    let vbuf = ringbuf::HeapRb::new(60);
-    let (video_prod, mut video_cons) = vbuf.split();
+    // if we use bounded channel, the decoder would stuck waiting for
+    // videos to be consumed while audio is empty
+    let (video_prod, video_cons) = crossbeam_channel::unbounded();
+    let (audio_prod, audio_cons) = crossbeam_channel::unbounded();
 
-    let abuf = ringbuf::HeapRb::new(60);
-    let (audio_prod, audio_cons) = abuf.split();
+    let (audio_stream, audio_config) =
+        audio::audio_init(audio_cons.clone(), audio::InitOpts::Default);
 
-    let (audio_stream, audio_config) = audio::audio_init(audio_cons, audio::InitOpts::Default);
     Decoder::decode(decoder, audio_config, video_prod, audio_prod);
 
-    thread::sleep(Duration::from_millis(100)); // waiting for decoder to init
+    // waiting for the few first frame to be ready
+    while video_cons.len() < 10 || audio_cons.len() < 10 {
+        thread::sleep(Duration::from_millis(1));
+    }
+    drop(audio_cons); // unused here so drop early
+
     audio_stream.play().unwrap();
+
     let mut buf: Vec<u32> = vec![0u32; width * height];
 
-    while window.is_open() && (!video_cons.is_empty() || video_cons.write_is_held()) {
-        while !video_cons.is_empty() || video_cons.write_is_held() {
-            if let Some(video) = video_cons.try_pop() {
-                buf = video::video_frame_to_vec(&video);
-                break;
-            } else {
-                thread::sleep(Duration::from_micros(10));
-            }
+    while window.is_open() {
+        match video_cons.recv_timeout(Duration::from_millis(1)) {
+            Ok(video) => buf = video::video_frame_to_vec(&video),
+            Err(RecvTimeoutError::Timeout) => {} // play the old frame if timeout
+            _ => break,
         }
 
         let (scaled_buf, scaled_width, scaled_height) =

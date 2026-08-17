@@ -3,7 +3,6 @@ extern crate ffmpeg_next as ffmpeg;
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
-    thread,
     time::Duration,
 };
 
@@ -11,17 +10,24 @@ use cpal::{
     SampleFormat,
     traits::{DeviceTrait, HostTrait},
 };
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
-use ringbuf::traits::{Consumer, Observer};
 
 #[allow(dead_code)]
 pub enum InitOpts {
+    /// Stable, and mostly the best opts
     Default,
+    /// Unstable.
+    /// Usually is just a higher sampling rate
     Best,
 }
 
+/// `InitOpts::Default` will use `cpal`'s default device and config
+///
+/// `InitOpts::Best` will try to find the best device
+/// with the best config using `cpal`'s `cmp_default_heuristics`
 pub fn audio_init(
-    consumer: ringbuf::HeapCons<frame::Audio>,
+    consumer: Receiver<frame::Audio>,
     init_opts: InitOpts,
 ) -> (cpal::Stream, cpal::SupportedStreamConfig) {
     let (device, config) = cpal_init(init_opts);
@@ -42,7 +48,7 @@ pub fn audio_init(
 fn build_audio<T>(
     device: cpal::Device,
     config: cpal::StreamConfig,
-    mut consumer: ringbuf::HeapCons<frame::Audio>,
+    consumer: Receiver<frame::Audio>,
 ) -> cpal::Stream
 where
     T: frame::audio::Sample + cpal::SizedSample + std::marker::Send + 'static + From<u8>,
@@ -53,17 +59,19 @@ where
         .build_output_stream(
             config,
             move |data: &mut [T], _| {
-                while queue.len() < data.len() && (!consumer.is_empty() || consumer.write_is_held())
-                {
-                    if let Some(audio) = consumer.try_pop() {
-                        queue.extend(unsafe {
+                while queue.len() < data.len() {
+                    match consumer.recv_timeout(Duration::from_millis(1)) {
+                        Ok(audio) => queue.extend(unsafe {
                             std::slice::from_raw_parts(
                                 audio.data(0).as_ptr() as *const T,
                                 audio.samples() * audio.channels() as usize,
                             )
-                        });
-                    } else {
-                        thread::sleep(Duration::from_micros(10));
+                        }),
+                        Err(RecvTimeoutError::Timeout) => {
+                            eprintln!("Audio: A buffer underrun occurred.");
+                            break;
+                        }
+                        _ => break,
                     }
                 }
 

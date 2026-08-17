@@ -3,6 +3,7 @@ extern crate ffmpeg_next as ffmpeg;
 use std::thread;
 use std::time::Duration;
 
+use crossbeam_channel::Sender;
 use ffmpeg::ChannelLayout;
 use ffmpeg::codec;
 use ffmpeg::decoder;
@@ -10,8 +11,6 @@ use ffmpeg::format;
 use ffmpeg::format::sample::Type as SampleType;
 use ffmpeg::frame;
 use ffmpeg::media;
-use ringbuf::traits::Observer;
-use ringbuf::traits::Producer;
 
 pub struct Decoder {
     ictx: format::context::Input,
@@ -64,12 +63,13 @@ impl Decoder {
         )
     }
 
+    /// Spawn 1 thread to start decoding.
     pub fn decode(
         mut decoder: Decoder,
         audio_config: cpal::SupportedStreamConfig,
-        mut video_prod: ringbuf::HeapProd<frame::Video>,
-        mut audio_prod: ringbuf::HeapProd<frame::Audio>,
-    ) {
+        mut video_prod: Sender<frame::Video>,
+        mut audio_prod: Sender<frame::Audio>,
+    ) -> thread::JoinHandle<()> {
         thread::spawn(move || {
             let mut scaler = ffmpeg::software::scaling::Context::get(
                 decoder.video_decoder.format(),
@@ -100,41 +100,49 @@ impl Decoder {
                 match stream.index() {
                     i if i == decoder.video_strm_index => {
                         decoder.video_decoder.send_packet(&packet).unwrap();
-                        Self::video_decode(
+                        if Self::video_decode(
                             &mut decoder.video_decoder,
                             &mut scaler,
                             &mut video_prod,
-                        );
+                        )
+                        .is_err()
+                        {
+                            break;
+                        }
                     }
                     i if i == decoder.audio_strm_index => {
                         decoder.audio_decoder.send_packet(&packet).unwrap();
-                        Self::audio_decode(
+                        if Self::audio_decode(
                             &mut decoder.audio_decoder,
                             &mut resampler,
                             &mut audio_prod,
-                        );
+                        )
+                        .is_err()
+                        {
+                            break;
+                        }
                     }
                     _ => {}
                 }
 
-                if !video_prod.read_is_held() || !audio_prod.read_is_held() {
-                    return;
+                while video_prod.len() > 10 && audio_prod.len() > 10 {
+                    thread::sleep(Duration::from_micros(100));
                 }
             }
 
             decoder.video_decoder.send_eof().unwrap();
             decoder.audio_decoder.send_eof().unwrap();
-            Self::video_decode(&mut decoder.video_decoder, &mut scaler, &mut video_prod);
-            Self::audio_decode(&mut decoder.audio_decoder, &mut resampler, &mut audio_prod);
+            let _ = Self::video_decode(&mut decoder.video_decoder, &mut scaler, &mut video_prod);
+            let _ = Self::audio_decode(&mut decoder.audio_decoder, &mut resampler, &mut audio_prod);
             Self::audio_flush(&mut resampler, &mut audio_prod);
-        });
+        })
     }
 
     fn video_decode(
         decoder: &mut decoder::Video,
         scaler: &mut ffmpeg::software::scaling::Context,
-        video_prod: &mut ringbuf::HeapProd<frame::Video>,
-    ) {
+        video_prod: &mut Sender<frame::Video>,
+    ) -> Result<(), ()> {
         loop {
             let mut decoded = frame::Video::empty();
 
@@ -145,20 +153,18 @@ impl Decoder {
             let mut frame = frame::Video::empty();
             scaler.run(&decoded, &mut frame).unwrap();
 
-            while video_prod.read_is_held()
-                && let Err(i) = video_prod.try_push(frame)
-            {
-                frame = i;
-                thread::sleep(Duration::from_micros(10));
-            }
+            if video_prod.send(frame).is_err() {
+                return Err(());
+            };
         }
+        Ok(())
     }
 
     fn audio_decode(
         decoder: &mut decoder::Audio,
         resampler: &mut ffmpeg::software::resampling::Context,
-        audio_prod: &mut ringbuf::HeapProd<frame::Audio>,
-    ) {
+        audio_prod: &mut Sender<frame::Audio>,
+    ) -> Result<(), ()> {
         loop {
             let mut decoded = frame::Audio::empty();
 
@@ -169,18 +175,16 @@ impl Decoder {
             let mut frame = frame::Audio::empty();
             let _ = resampler.run(&decoded, &mut frame).unwrap();
 
-            while audio_prod.read_is_held()
-                && let Err(i) = audio_prod.try_push(frame)
-            {
-                frame = i;
-                thread::sleep(Duration::from_micros(10));
+            if audio_prod.send(frame).is_err() {
+                return Err(());
             }
         }
+        Ok(())
     }
 
     fn audio_flush(
         resampler: &mut ffmpeg::software::resampling::Context,
-        audio_prod: &mut ringbuf::HeapProd<frame::Audio>,
+        audio_prod: &mut Sender<frame::Audio>,
     ) {
         loop {
             let mut frame = frame::Audio::new(
@@ -194,11 +198,8 @@ impl Decoder {
                 break;
             }
 
-            while audio_prod.read_is_held()
-                && let Err(i) = audio_prod.try_push(frame)
-            {
-                frame = i;
-                thread::sleep(Duration::from_micros(10));
+            if audio_prod.send(frame).is_err() {
+                break;
             }
         }
     }

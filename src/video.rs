@@ -8,10 +8,10 @@ pub fn new_window(path: &str, fps: usize, width: usize, height: usize) -> Window
         width,
         height,
         WindowOptions {
+            scale: minifb::Scale::X1,
             /* There's a scale mode `AspectRatioStretch`
             From what tested, it did scale up
-            but it didn't center, so we use `Center` then do the scale up by ourself. */
-            scale: minifb::Scale::X1,
+            but it didn't center, so we use `Center` then do the `scale_to_fit` by ourself. */
             scale_mode: minifb::ScaleMode::Center,
             resize: true,
             ..WindowOptions::default()
@@ -22,6 +22,9 @@ pub fn new_window(path: &str, fps: usize, width: usize, height: usize) -> Window
     window
 }
 
+/// Assume frame is 0RGB.
+///
+/// Return **0RGB32 packed** Vec (required by minifb)
 pub fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
     let mut buf = vec![0u32; video.height() as usize * video.width() as usize];
 
@@ -40,13 +43,18 @@ pub fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
     return buf;
 }
 
+/// Scale dynamically to fit the window.
+///
+/// Example:
+/// ```rust
+/// let (scaled_buf, new_width, new_height) = scale_to_fit(window, &buf, width, height);
+/// ```
 pub fn scale_to_fit(
     window: &Window,
     buf: &[u32],
     width: usize,
     height: usize,
 ) -> (Vec<u32>, usize, usize) {
-    // scale the our buffer to fit the window dynamically
     let scalar = {
         let (target_width, target_height) = window.get_size();
         let width_ratio = target_width as f64 / width as f64;
@@ -54,12 +62,7 @@ pub fn scale_to_fit(
         f64::min(width_ratio, height_ratio)
     };
 
-    scaling(&buf, scalar, width, height)
-}
-
-pub fn scaling(buf: &[u32], scalar: f64, width: usize, height: usize) -> (Vec<u32>, usize, usize) {
-    /* TODO: use fixed-point scalar.
-    fixed-point would make this vectorizable. */
+    // TODO: use fixed-point scalar.
 
     let new_width = (width as f64 * scalar) as usize;
     let new_height = (height as f64 * scalar) as usize;
