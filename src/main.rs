@@ -16,6 +16,11 @@ const HEIGHT_LIMIT: usize = 8640;
 const FPS_LIMIT: usize = 1000;
 
 fn main() {
+    // Currently this would panic on errors.
+    // TODO: Handle the error properbly via error messages.
+
+    // We're expecting both the audio and the video to exist.
+    // TODO: Handle the audio/video only case.
     let path = std::env::args().nth(1).expect("Cannot open file.");
     let (decoder, fps, width, height) = Decoder::new(&path);
     let fps = fps.round() as usize; // <- remember to round here
@@ -61,8 +66,12 @@ fn main() {
         for key in window.get_keys_pressed(KeyRepeat::No).iter() {
             match key {
                 Key::Space => video.pause(&audio_stream),
+                // TODO: handle arrow keys for skip +-10s
                 _ => {}
             }
         }
+        // TODO: Add progress bar.
+        // On Hyprland, `minifb` window does not show the mouse cursor
+        // So it's better to show the progress bar in the terminal instead.
     }
 }
