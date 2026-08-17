@@ -5,11 +5,16 @@ use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
 use minifb::{Window, WindowOptions};
 
-pub fn new_window(path: &str, fps: usize, width: usize, height: usize) -> Window {
+use crate::{FPS_LIMIT, HEIGHT_LIMIT, WIDTH_LIMIT};
+
+pub fn new_window(path: &str, fps: usize, width: u32, height: u32) -> Window {
+    assert!(width <= WIDTH_LIMIT as u32);
+    assert!(height <= HEIGHT_LIMIT as u32);
+    assert!(fps <= FPS_LIMIT);
     let mut window = Window::new(
         format!("media-player -- Playing: {path}").as_str(),
-        width,
-        height,
+        width as usize,
+        height as usize,
         WindowOptions {
             scale: minifb::Scale::X1,
             /* There's a scale mode `AspectRatioStretch`
@@ -28,8 +33,8 @@ pub fn new_window(path: &str, fps: usize, width: usize, height: usize) -> Window
 #[derive(Debug, Clone)]
 pub struct Video {
     buf: Vec<u32>,
-    width: usize,
-    height: usize,
+    width: u32,
+    height: u32,
 
     frame_time: f64,
 
@@ -39,9 +44,11 @@ pub struct Video {
 }
 
 impl Video {
-    pub fn new(width: usize, height: usize, fps: usize, consumer: Receiver<frame::Video>) -> Self {
+    pub fn new(width: u32, height: u32, fps: usize, consumer: Receiver<frame::Video>) -> Self {
+        assert!(width <= WIDTH_LIMIT as u32);
+        assert!(height <= HEIGHT_LIMIT as u32);
         Self {
-            buf: vec![0u32; width * height],
+            buf: vec![0u32; width as usize * height as usize],
             width,
             height,
             frame_time: 1.0 / fps as f64,
@@ -71,7 +78,7 @@ impl Video {
         let (scaled_buf, scaled_width, scaled_height) =
             scale_to_fit(window, &self.buf, self.width, self.height);
         window
-            .update_with_buffer(&scaled_buf, scaled_width, scaled_height)
+            .update_with_buffer(&scaled_buf, scaled_width as usize, scaled_height as usize)
             .unwrap();
 
         window.is_open()
@@ -84,7 +91,7 @@ impl Video {
             .recv_timeout(Duration::from_secs_f64(self.frame_time / 2.0))
         {
             Ok(video) => self.buf = video_frame_to_vec(&video),
-            Err(RecvTimeoutError::Timeout) => {} // play the old frame if timeout
+            Err(RecvTimeoutError::Timeout) => {}
             _ => return None,
         }
         Some(())
@@ -122,38 +129,34 @@ fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
 /// ```rust
 /// let (scaled_buf, new_width, new_height) = scale_to_fit(window, &buf, width, height);
 /// ```
-fn scale_to_fit(
-    window: &Window,
-    buf: &[u32],
-    width: usize,
-    height: usize,
-) -> (Vec<u32>, usize, usize) {
+fn scale_to_fit(window: &Window, buf: &[u32], width: u32, height: u32) -> (Vec<u32>, u32, u32) {
+    assert!(width <= WIDTH_LIMIT as u32);
+    assert!(height <= HEIGHT_LIMIT as u32);
+
     let scalar = {
         let (target_width, target_height) = window.get_size();
-        let width_ratio = target_width as f64 / width as f64;
-        let height_ratio = target_height as f64 / height as f64;
-        f64::min(width_ratio, height_ratio)
+        let width_ratio = target_width.clamp(0, WIDTH_LIMIT) as f64 / width as f64;
+        let height_ratio = target_height.clamp(0, HEIGHT_LIMIT) as f64 / height as f64;
+        (f64::min(width_ratio, height_ratio) * 2f64.powi(16)) as u32
     };
 
-    // TODO: use fixed-point scalar.
-
-    let new_width = (width as f64 * scalar) as usize;
-    let new_height = (height as f64 * scalar) as usize;
+    let new_width = (width * scalar) >> 16;
+    let new_height = (height * scalar) >> 16;
 
     if new_width == 0 || new_height == 0 {
         return (Vec::new(), 0, 0);
     }
 
-    let mut scaled_buf = vec![0u32; new_width * new_height];
-    let step = 1.0 / scalar;
+    let mut scaled_buf = vec![0u32; new_width as usize * new_height as usize];
+    let step = (2f64.powi(32) / scalar as f64) as u32;
 
-    let mut i = 0f64;
-    for dst_row in scaled_buf.chunks_exact_mut(new_width) {
-        let src_row = &buf[i as usize * width..];
+    let mut i = 0u32;
+    for dst_row in scaled_buf.chunks_exact_mut(new_width as usize) {
+        let src_row = &buf[(i >> 16) as usize * width as usize..];
 
-        let mut j = 0f64;
+        let mut j = 0u32;
         for pixel in dst_row.iter_mut() {
-            *pixel = src_row[j as usize];
+            *pixel = src_row[(j >> 16) as usize];
             j += step;
         }
 

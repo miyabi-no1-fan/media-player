@@ -11,12 +11,29 @@ mod audio; // cpal
 mod decode; // ffmpeg
 mod video; // minifb
 
+const WIDTH_LIMIT: usize = 15360;
+const HEIGHT_LIMIT: usize = 8640;
+const FPS_LIMIT: usize = 1000;
+
 fn main() {
     let path = std::env::args().nth(1).expect("Cannot open file.");
     let (decoder, fps, width, height) = Decoder::new(&path);
-
     let fps = fps.round() as usize; // <- remember to round here
-    let (width, height) = (width as usize, height as usize);
+
+    if width > WIDTH_LIMIT as u32 {
+        eprintln!("Error: Video exceed width limit. Limit is {WIDTH_LIMIT}, found {width}");
+        return;
+    }
+
+    if height > HEIGHT_LIMIT as u32 {
+        eprintln!("Error: Video exceed height limit. Limit is {HEIGHT_LIMIT}, found {height}");
+        return;
+    }
+
+    if fps > FPS_LIMIT {
+        eprintln!("Error: Video exceed fps limit. Limit is {FPS_LIMIT}, found {fps}");
+        return;
+    }
 
     let mut window = video::new_window(path.as_str(), fps, width, height);
 
