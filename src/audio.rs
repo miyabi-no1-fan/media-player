@@ -11,17 +11,22 @@ use cpal::{
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
 
+use crate::Error;
+
 #[allow(dead_code)]
 pub enum InitOpts {
     /// Stable, and mostly the best opts
     Default,
     /// Unstable.
-    /// Usually is just a higher sampling rate
+    /// Usually is just a higher sampling rate.
+    /// Too high sampling rate may cause some jiter.
     Best,
 }
 
 /// ## Notice
-/// Audio required decoder to send data that matches `audio_config`
+/// Audio required decoder to send data that matches `audio_config`.
+///
+/// Audio will play nothing if `recv` fail.
 /// ### Arguments
 /// `InitOpts::Default` will use `cpal`'s default device and config
 ///
@@ -34,8 +39,8 @@ pub enum InitOpts {
 pub fn audio_init(
     consumer: Receiver<frame::Audio>,
     init_opts: InitOpts,
-) -> (cpal::Stream, cpal::SupportedStreamConfig) {
-    let (device, config) = cpal_init(init_opts);
+) -> Result<(cpal::Stream, cpal::SupportedStreamConfig), Error> {
+    let (device, config) = cpal_init(init_opts)?;
 
     let stream = match config.sample_format() {
         SampleFormat::U8 => build_audio::<u8>(device, config.into(), consumer),
@@ -44,88 +49,90 @@ pub fn audio_init(
         // SampleFormat::I64 => build_audio::<i64>(device, config.into(), consumer),
         SampleFormat::F32 => build_audio::<f32>(device, config.into(), consumer),
         SampleFormat::F64 => build_audio::<f64>(device, config.into(), consumer),
-        _ => panic!("Audio: Unsupported Sample Format"),
-    };
+        _ => {
+            return Err(Error::Audio(cpal::ErrorKind::UnsupportedConfig.into()));
+        }
+    }?;
 
-    (stream, config)
+    Ok((stream, config))
 }
 
 fn build_audio<T>(
     device: cpal::Device,
     config: cpal::StreamConfig,
     consumer: Receiver<frame::Audio>,
-) -> cpal::Stream
+) -> Result<cpal::Stream, Error>
 where
     T: frame::audio::Sample + cpal::SizedSample + std::marker::Send + 'static + From<u8>,
 {
     let mut queue = VecDeque::new();
 
-    let stream = device
-        .build_output_stream(
-            config,
-            move |data: &mut [T], _| {
-                while queue.len() < data.len() {
-                    match consumer.recv_timeout(Duration::from_millis(1)) {
-                        Ok(audio) => {
-                            let mut len = audio.samples() * audio.channels() as usize;
+    let stream = device.build_output_stream(
+        config,
+        move |data: &mut [T], _| {
+            while queue.len() < data.len() {
+                match consumer.recv_timeout(Duration::from_millis(1)) {
+                    Ok(audio) => {
+                        let mut len = audio.samples() * audio.channels() as usize;
 
-                            if len > audio.data(0).len() {
-                                len = audio.data(0).len();
-                            }
-
-                            let misalignment = len % size_of::<T>();
-                            if misalignment > 0 {
-                                len -= misalignment;
-                            }
-
-                            // SAFETY:
-                            assert!(len <= audio.data(0).len());
-                            assert!(len % size_of::<T>() == 0);
-                            queue.extend(unsafe {
-                                std::slice::from_raw_parts(audio.data(0).as_ptr() as *const T, len)
-                            });
+                        if len > audio.data(0).len() {
+                            len = audio.data(0).len();
                         }
-                        Err(RecvTimeoutError::Timeout) => {
-                            eprintln!("Audio: A buffer underrun occurred.");
-                            break;
+
+                        let misalignment = len % size_of::<T>();
+                        if misalignment > 0 {
+                            len -= misalignment;
                         }
-                        _ => break,
+
+                        // SAFETY:
+                        assert!(len <= audio.data(0).len());
+                        assert!(len % size_of::<T>() == 0);
+                        queue.extend(unsafe {
+                            std::slice::from_raw_parts(audio.data(0).as_ptr() as *const T, len)
+                        });
                     }
+                    Err(RecvTimeoutError::Timeout) => {
+                        eprintln!("Audio: A buffer underrun occurred.");
+                        break;
+                    }
+                    _ => break,
                 }
+            }
 
-                let n = usize::min(queue.len(), data.len());
+            let n = usize::min(queue.len(), data.len());
 
-                for dst in data[..n].iter_mut() {
-                    *dst = queue.pop_front().unwrap();
-                }
+            // unwrap is safe here. We already check for `n`
+            for dst in data[..n].iter_mut() {
+                *dst = queue.pop_front().unwrap();
+            }
 
-                data[n..].fill(T::from(0));
-            },
-            |e| eprintln!("Audio: {e}"),
-            None,
-        )
-        .unwrap();
+            data[n..].fill(T::from(0));
+        },
+        |e| eprintln!("Audio: {e}"),
+        None,
+    )?;
 
-    stream
+    Ok(stream)
 }
 
-fn cpal_init(opts: InitOpts) -> (cpal::Device, cpal::SupportedStreamConfig) {
+fn cpal_init(opts: InitOpts) -> Result<(cpal::Device, cpal::SupportedStreamConfig), Error> {
     let host = cpal::default_host();
 
-    let mut best_device = host.default_output_device().unwrap();
-    let default_conf = best_device.default_output_config().unwrap();
+    let mut best_device = host
+        .default_output_device()
+        .ok_or(Error::Log("No audio output device."))?;
+    let default_conf = best_device.default_output_config()?;
 
     match opts {
-        InitOpts::Default => return (best_device, default_conf),
+        InitOpts::Default => return Ok((best_device, default_conf)),
         _ => {}
     }
 
-    let devices = host.output_devices().unwrap();
-    let mut best_conf_range = best_device
-        .supported_output_configs()
-        .unwrap()
-        .next()
-        .unwrap();
+    let devices = host.output_devices()?;
+    let Some(mut best_conf_range) = best_device.supported_output_configs()?.next() else {
+        return Ok((best_device, default_conf));
+    };
+
     for device in devices {
         if let Ok(configs) = device.supported_output_configs() {
             for config in configs {
@@ -139,14 +146,14 @@ fn cpal_init(opts: InitOpts) -> (cpal::Device, cpal::SupportedStreamConfig) {
         };
     }
 
-    (best_device, best_conf_range.with_max_sample_rate())
+    Ok((best_device, best_conf_range.with_max_sample_rate()))
 }
 
 fn try_build_audio(device: &cpal::Device, config: cpal::SupportedStreamConfig) -> bool {
     let err = Arc::new(Mutex::new(false));
     let res = {
         let err = err.clone();
-        let errfn = move |_| *err.lock().unwrap() = false;
+        let errfn = move |_| *err.lock().unwrap() = false; // lock is not poisoned
         match config.sample_format() {
             SampleFormat::U8 => device
                 .build_output_stream(config.into(), |_: &mut [u8], _| {}, errfn, None)
@@ -169,6 +176,7 @@ fn try_build_audio(device: &cpal::Device, config: cpal::SupportedStreamConfig) -
             _ => None,
         }
     };
+    // lock is not poisoned
     if res.is_some() && !*err.lock().unwrap() {
         true
     } else {
