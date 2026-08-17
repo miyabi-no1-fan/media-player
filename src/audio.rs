@@ -20,6 +20,9 @@ pub enum InitOpts {
     Best,
 }
 
+/// ## Notice
+/// Audio required decoder to send data that matches `audio_config`
+/// ### Arguments
 /// `InitOpts::Default` will use `cpal`'s default device and config
 ///
 /// `InitOpts::Best` will try to find the best device
@@ -63,12 +66,25 @@ where
             move |data: &mut [T], _| {
                 while queue.len() < data.len() {
                     match consumer.recv_timeout(Duration::from_millis(1)) {
-                        Ok(audio) => queue.extend(unsafe {
-                            std::slice::from_raw_parts(
-                                audio.data(0).as_ptr() as *const T,
-                                audio.samples() * audio.channels() as usize,
-                            )
-                        }),
+                        Ok(audio) => {
+                            let mut len = audio.samples() * audio.channels() as usize;
+
+                            if len > audio.data(0).len() {
+                                len = audio.data(0).len();
+                            }
+
+                            let misalignment = len % size_of::<T>();
+                            if misalignment > 0 {
+                                len -= misalignment;
+                            }
+
+                            // SAFETY:
+                            assert!(len <= audio.data(0).len());
+                            assert!(len % size_of::<T>() == 0);
+                            queue.extend(unsafe {
+                                std::slice::from_raw_parts(audio.data(0).as_ptr() as *const T, len)
+                            });
+                        }
                         Err(RecvTimeoutError::Timeout) => {
                             eprintln!("Audio: A buffer underrun occurred.");
                             break;
