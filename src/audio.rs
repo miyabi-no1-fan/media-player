@@ -14,7 +14,7 @@ use ffmpeg::frame;
 use crate::Error;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InitOpts {
     /// Stable, and mostly the best opts
     Default,
@@ -24,7 +24,7 @@ pub enum InitOpts {
     Best,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
     /// Audio is still running
     Running,
@@ -32,7 +32,7 @@ pub enum Status {
     Finish,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Task {
     Pause,
     Play,
@@ -110,11 +110,6 @@ where
             config,
             move |data: &mut [T], _| {
                 let mut play = || {
-                    if let Status::Finish = *ctrl.status.lock().unwrap() {
-                        data.fill(T::from(0));
-                        return;
-                    }
-
                     while queue.len() < data.len() {
                         match consumer.recv_timeout(Duration::from_secs_f64(avail_dur / 2.0)) {
                             Ok(audio) => {
@@ -145,7 +140,7 @@ where
                             }
                             Err(_) if queue.is_empty() => {
                                 *ctrl.status.lock().unwrap() = Status::Finish;
-                                return;
+                                break;
                             }
                             Err(_) => break,
                         }
