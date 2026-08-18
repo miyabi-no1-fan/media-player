@@ -93,7 +93,7 @@ fn main() {
                     std::process::exit(1);
                 }
             },
-        }
+        };
     }
 }
 
@@ -169,14 +169,10 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
                     Key::Space => {
                         video.is_paused = !video.is_paused;
                         if is_audio {
-                            // try hardware support for pause (saving energy sth)
-                            if audio_stream.as_ref().unwrap().pause().is_err() {
-                                // fallback
-                                audio_status
-                                    .as_ref()
-                                    .unwrap()
-                                    .fetch_not(atomic::Ordering::AcqRel);
-                            }
+                            audio_status
+                                .as_ref()
+                                .unwrap()
+                                .fetch_not(atomic::Ordering::AcqRel);
                         }
                     }
 
