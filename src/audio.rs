@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex, atomic},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -14,6 +14,7 @@ use ffmpeg::frame;
 use crate::Error;
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub enum InitOpts {
     /// Stable, and mostly the best opts
     Default,
@@ -21,6 +22,26 @@ pub enum InitOpts {
     /// Usually is just a higher sampling rate.
     /// Too high sampling rate may cause some jiter.
     Best,
+}
+
+#[derive(Debug)]
+pub enum Status {
+    /// Audio is still running
+    Running,
+    /// Audio has finish, no more audio to play.
+    Finish,
+}
+
+#[derive(Debug)]
+pub enum Task {
+    Pause,
+    Play,
+}
+
+#[derive(Debug)]
+pub struct Control {
+    pub task: Mutex<Task>,
+    pub status: Mutex<Status>,
 }
 
 /// ## Notice
@@ -40,22 +61,15 @@ pub enum InitOpts {
 ///
 /// ## Usage
 /// ```rust
-/// let (audio_stream, audio_config, audio_status) = audio_init(audio_consumer, InitOpts::Default);
+/// let (audio_stream, audio_config, audio_control) = audio_init(audio_consumer, InitOpts::Default);
 /// ```
 pub fn audio_init(
     consumer: Receiver<frame::Audio>,
     init_opts: InitOpts,
-) -> Result<
-    (
-        cpal::Stream,
-        cpal::SupportedStreamConfig,
-        Arc<atomic::AtomicBool>,
-    ),
-    Error,
-> {
+) -> Result<(cpal::Stream, cpal::SupportedStreamConfig, Arc<Control>), Error> {
     let (device, config) = cpal_init(init_opts)?;
 
-    let (stream, status) = match config.sample_format() {
+    let (stream, ctrl) = match config.sample_format() {
         SampleFormat::U8 => build_audio::<u8>(device, config.into(), consumer),
         SampleFormat::I16 => build_audio::<i16>(device, config.into(), consumer),
         SampleFormat::I32 => build_audio::<i32>(device, config.into(), consumer),
@@ -67,14 +81,14 @@ pub fn audio_init(
         }
     }?;
 
-    Ok((stream, config, status))
+    Ok((stream, config, ctrl))
 }
 
 fn build_audio<T>(
     device: cpal::Device,
     config: cpal::StreamConfig,
     consumer: Receiver<frame::Audio>,
-) -> Result<(cpal::Stream, Arc<atomic::AtomicBool>), Error>
+) -> Result<(cpal::Stream, Arc<Control>), Error>
 where
     T: frame::audio::Sample + cpal::SizedSample + std::marker::Send + 'static + From<u8>,
 {
@@ -85,66 +99,79 @@ where
     // We have at most `avail_dur` to process before data got underrun.
     let avail_dur = 1.0 / config.sample_rate as f64;
 
-    let status = Arc::new(atomic::AtomicBool::new(true));
+    let ctrl = Arc::new(Control {
+        task: Mutex::new(Task::Play),
+        status: Mutex::new(Status::Running),
+    });
 
     let stream = {
-        let status = status.clone();
+        let ctrl = ctrl.clone();
         device.build_output_stream(
             config,
             move |data: &mut [T], _| {
-                // don't run anything if `status` is already false
-                if !status.load(atomic::Ordering::Acquire) {
-                    return;
-                }
-
-                while queue.len() < data.len() {
-                    match consumer.recv_timeout(Duration::from_secs_f64(avail_dur / 2.0)) {
-                        Ok(audio) => {
-                            let mut len = audio.samples() * audio.channels() as usize;
-
-                            if len > audio.data(0).len() {
-                                len = audio.data(0).len();
-                            }
-
-                            let misalignment = len % size_of::<T>();
-                            if misalignment > 0 {
-                                len -= misalignment;
-                            }
-
-                            // SAFETY:
-                            assert!(len <= audio.data(0).len());
-                            assert!(len % size_of::<T>() == 0);
-                            queue.extend(unsafe {
-                                std::slice::from_raw_parts(audio.data(0).as_ptr() as *const T, len)
-                            });
-                        }
-                        Err(RecvTimeoutError::Timeout) => {
-                            eprintln!("Audio: A buffer underrun occurred.");
-                            break;
-                        }
-                        _ if queue.is_empty() => {
-                            status.store(false, atomic::Ordering::Release);
-                            return;
-                        }
-                        _ => break,
+                let mut play = || {
+                    if let Status::Finish = *ctrl.status.lock().unwrap() {
+                        data.fill(T::from(0));
+                        return;
                     }
+
+                    while queue.len() < data.len() {
+                        match consumer.recv_timeout(Duration::from_secs_f64(avail_dur / 2.0)) {
+                            Ok(audio) => {
+                                let mut len = audio.samples() * audio.channels() as usize;
+
+                                if len > audio.data(0).len() {
+                                    len = audio.data(0).len();
+                                }
+
+                                let misalignment = len % size_of::<T>();
+                                if misalignment > 0 {
+                                    len -= misalignment;
+                                }
+
+                                // SAFETY: assertions for safety
+                                assert!(len <= audio.data(0).len());
+                                assert!(len % size_of::<T>() == 0);
+                                queue.extend(unsafe {
+                                    std::slice::from_raw_parts(
+                                        audio.data(0).as_ptr() as *const T,
+                                        len,
+                                    )
+                                });
+                            }
+                            Err(RecvTimeoutError::Timeout) => {
+                                eprintln!("Audio: A buffer underrun occurred.");
+                                break;
+                            }
+                            Err(_) if queue.is_empty() => {
+                                *ctrl.status.lock().unwrap() = Status::Finish;
+                                return;
+                            }
+                            Err(_) => break,
+                        }
+                    }
+
+                    let n = usize::min(queue.len(), data.len());
+
+                    // unwrap is safe here. We already check for `n`
+                    for dst in data[..n].iter_mut() {
+                        *dst = queue.pop_front().unwrap();
+                    }
+
+                    data[n..].fill(T::from(0));
+                };
+
+                match *ctrl.task.lock().unwrap() {
+                    Task::Pause => data.fill(T::from(0)),
+                    Task::Play => play(),
                 }
-
-                let n = usize::min(queue.len(), data.len());
-
-                // unwrap is safe here. We already check for `n`
-                for dst in data[..n].iter_mut() {
-                    *dst = queue.pop_front().unwrap();
-                }
-
-                data[n..].fill(T::from(0));
             },
             |e| eprintln!("Audio: {e}"),
             None,
         )
     }?;
 
-    Ok((stream, status))
+    Ok((stream, ctrl))
 }
 
 fn cpal_init(opts: InitOpts) -> Result<(cpal::Device, cpal::SupportedStreamConfig), Error> {

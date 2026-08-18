@@ -124,13 +124,13 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
     let (audio_prod, audio_cons) = crossbeam_channel::unbounded();
 
     // we'll run no audio if `audio_init` failed
-    let (audio_stream, audio_config, audio_status) =
+    let (audio_stream, audio_config, audio_control) =
         match audio::audio_init(audio_cons.clone(), audio::InitOpts::Default) {
             Ok((a, b, c)) => (Some(a), Some(b), Some(c)),
             Err(_) => (None, None, None),
         };
 
-    let is_audio = audio_stream.is_some() && audio_config.is_some() && audio_status.is_some();
+    let is_audio = audio_stream.is_some() && audio_config.is_some() && audio_control.is_some();
 
     let handle = Decoder::decode(decoder, audio_config, Some(video_prod), Some(audio_prod));
 
@@ -174,7 +174,7 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
                 print!("\r");
                 println!("{time} / {duration}");
                 let _ = std::io::stdout().flush();
-                thread::sleep(Duration::from_secs_f64(1.0));
+                thread::sleep(Duration::from_secs(1));
                 while is_paused.load(atomic::Ordering::Acquire) {
                     thread::sleep(Duration::from_millis(1));
                 }
@@ -200,10 +200,12 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
                         video.is_paused = !video.is_paused;
                         is_paused.fetch_not(atomic::Ordering::AcqRel);
                         if is_audio {
-                            audio_status
-                                .as_ref()
-                                .unwrap()
-                                .fetch_not(atomic::Ordering::AcqRel);
+                            let ctrl = audio_control.as_ref().unwrap();
+                            let mut task = ctrl.task.lock().unwrap();
+                            *task = match *task {
+                                audio::Task::Play => audio::Task::Pause,
+                                audio::Task::Pause => audio::Task::Play,
+                            };
                         }
                     }
 
@@ -219,10 +221,9 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
         .join()
         .expect("Couldn't join on the associated thread")?;
 
-    // wait until `audio_status` is false if audio is playing
     if is_audio {
-        let status = audio_status.as_ref().unwrap();
-        while status.load(atomic::Ordering::Relaxed) {
+        let ctrl = audio_control.as_ref().unwrap();
+        while let audio::Status::Running = *ctrl.status.lock().unwrap() {
             thread::sleep(Duration::from_millis(10));
         }
     }
