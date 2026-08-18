@@ -23,11 +23,6 @@ pub enum InitOpts {
     Best,
 }
 
-/// Instead of set `status` to false immedietly when `queue` and `consumer` is empty.
-///
-/// This will only set `status` to false if `queue` and `consumer` is empty for `TOLERANT` continuos times
-const TOLERANT: usize = 3;
-
 /// ## Notice
 /// Audio required decoder to send resampled data that matches `audio_config`.
 ///
@@ -90,7 +85,6 @@ where
     // We have at most `avail_dur` to process before data got underrun.
     let avail_dur = 1.0 / config.sample_rate as f64;
 
-    let mut i = 0;
     let status = Arc::new(atomic::AtomicBool::new(true));
 
     let stream = {
@@ -128,6 +122,10 @@ where
                             eprintln!("Audio: A buffer underrun occurred.");
                             break;
                         }
+                        _ if queue.is_empty() => {
+                            status.store(false, atomic::Ordering::Release);
+                            return;
+                        }
                         _ => break,
                     }
                 }
@@ -140,15 +138,6 @@ where
                 }
 
                 data[n..].fill(T::from(0));
-
-                if queue.is_empty() && consumer.is_empty() {
-                    i += 1;
-                    if i >= TOLERANT {
-                        status.store(false, atomic::Ordering::Release);
-                    }
-                } else {
-                    i = 0;
-                }
             },
             |e| eprintln!("Audio: {e}"),
             None,
