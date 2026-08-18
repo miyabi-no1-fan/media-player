@@ -1,6 +1,6 @@
 extern crate ffmpeg_next as ffmpeg;
 
-use std::{thread, time::Duration};
+use std::{sync::atomic, thread, time::Duration};
 
 use cpal::traits::StreamTrait;
 use minifb::{Key, KeyRepeat, Window};
@@ -14,6 +14,8 @@ mod video; // minifb
 const WIDTH_LIMIT: usize = 15360;
 const HEIGHT_LIMIT: usize = 8640;
 const FPS_LIMIT: usize = 1000;
+
+const DECODE_QUEUE_LEN: usize = 20;
 
 #[allow(dead_code)]
 enum Error {
@@ -29,8 +31,7 @@ fn help() {
     println!("media-player\nUsage: media-player [media file]");
     println!("Options:");
     println!("--help | -h          Print the this help description.");
-    println!("--repeat | -r [v]    How many times to repeat the video, v must be > 0");
-    println!("                     run again forever if v == 0");
+    println!("--repeat | -r [n]    Repeat n times. Repeat forever if n is 0");
 }
 
 fn main() {
@@ -60,7 +61,7 @@ fn main() {
                     std::process::exit(1);
                 };
                 if num == 0 {
-                    // run again forever was a lie
+                    // repeat forever was a lie :)
                     repeat = usize::MAX;
                 } else {
                     repeat = num as usize;
@@ -84,7 +85,7 @@ fn main() {
 
     for _ in 0..repeat {
         window = match run(path.clone(), window) {
-            Ok(window) => Some(window),
+            Ok(window) => window,
             Err(err) => match err {
                 Error::Exit => break,
                 err => {
@@ -96,55 +97,111 @@ fn main() {
     }
 }
 
-fn run(path: String, window: Option<Window>) -> Result<Window, Error> {
-    // We're expecting both the audio and the video to exist.
-    // TODO: Handle the audio/video only case.
-
+fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
     let (decoder, fps, width, height) = Decoder::new(&path)?;
-    let fps = fps.round() as usize; // <- remember to round here
+
+    let mut is_video = fps.is_some() && width.is_some() && height.is_some();
+
+    let fps = if is_video {
+        Some(fps.unwrap().round() as usize) // <- remember to round here
+    } else {
+        None
+    };
 
     // if we use bounded channel, the decoder would stuck waiting for
     // videos to be consumed while audio is empty
     let (video_prod, video_cons) = crossbeam_channel::unbounded();
     let (audio_prod, audio_cons) = crossbeam_channel::unbounded();
 
-    let (audio_stream, audio_config) =
-        audio::audio_init(audio_cons.clone(), audio::InitOpts::Default)?;
+    // we'll run no audio if `audio_init` failed
+    let (audio_stream, audio_config, audio_status) =
+        match audio::audio_init(audio_cons.clone(), audio::InitOpts::Default) {
+            Ok((a, b, c)) => (Some(a), Some(b), Some(c)),
+            Err(_) => (None, None, None),
+        };
 
-    let handle = Decoder::decode(decoder, audio_config, video_prod, audio_prod);
+    let is_audio = audio_stream.is_some() && audio_config.is_some() && audio_status.is_some();
+
+    let handle = Decoder::decode(decoder, audio_config, Some(video_prod), Some(audio_prod));
 
     // waiting for the few first frame to be ready
-    while video_cons.len() < 10 || audio_cons.len() < 10 {
-        thread::sleep(Duration::from_millis(1));
+    while (is_video && video_cons.len() <= DECODE_QUEUE_LEN)
+        || (is_audio && audio_cons.len() <= DECODE_QUEUE_LEN)
+    {
+        thread::sleep(Duration::from_millis(10));
     }
     drop(audio_cons); // unused here so drop early
 
+    // if window is some, use the window,
+    // else, create a new window,
+    // if create new window fail, fallback to no video.
     let mut window = match window {
-        Some(w) => w,
-        None => video::new_window(path.as_str(), fps, width, height)?,
-    };
-
-    let mut video = Video::new(width, height, fps, video_cons);
-
-    audio_stream.play()?;
-
-    while video.update(&mut window)? {
-        for key in window.get_keys_pressed(KeyRepeat::No).iter() {
-            match key {
-                Key::Space => video.pause(&audio_stream)?,
-
-                // TODO: handle arrow keys for skip +-10s
-                _ => {}
+        Some(window) => Some(window),
+        None => {
+            if is_video {
+                if let Ok(window) =
+                    video::new_window(path.as_str(), fps.unwrap(), width.unwrap(), height.unwrap())
+                {
+                    Some(window)
+                } else {
+                    is_video = false;
+                    None
+                }
+            } else {
+                None
             }
         }
-        // TODO: Add progress bar.
-        // On Hyprland, `minifb` window does not show the mouse cursor.
-        // So it's better to show the progress bar in the terminal instead.
+    };
+
+    if is_audio {
+        audio_stream.as_ref().unwrap().play()?;
     }
 
+    if is_video {
+        let window = window.as_mut().unwrap();
+        let mut video = Video::new(width.unwrap(), height.unwrap(), fps.unwrap(), video_cons);
+
+        // update will exit if window is close or
+        // if `video_cons` can't `recv` any frames more
+        while video.update(window)? {
+            for key in window.get_keys_pressed(KeyRepeat::No).iter() {
+                match key {
+                    Key::Space => {
+                        video.is_paused = !video.is_paused;
+                        if is_audio {
+                            // try hardware support for pause (saving energy sth)
+                            if audio_stream.as_ref().unwrap().pause().is_err() {
+                                // fallback
+                                audio_status
+                                    .as_ref()
+                                    .unwrap()
+                                    .fetch_not(atomic::Ordering::AcqRel);
+                            }
+                        }
+                    }
+
+                    // TODO: handle arrow keys for skip +-10s
+                    _ => {}
+                }
+            }
+            // TODO: Add a progress bar.
+            // On Hyprland, `minifb` window does not show the mouse cursor.
+            // So it's better to show the progress bar in the terminal instead.
+        }
+    }
+
+    // join decoder thread to check for errors
     handle
         .join()
         .expect("Couldn't join on the associated thread")?;
+
+    // wait until `audio_status` is false if audio is playing
+    if is_audio {
+        let status = audio_status.as_ref().unwrap();
+        while status.load(atomic::Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     Ok(window)
 }
