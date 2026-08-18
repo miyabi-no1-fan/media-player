@@ -172,7 +172,7 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
                 print!("\x1B[1A");
                 print!("\x1B[2K");
                 print!("\r");
-                println!("{time} / {duration}");
+                println!("{time} / {duration} seconds");
                 let _ = std::io::stdout().flush();
                 thread::sleep(Duration::from_secs(1));
                 while is_paused.load(atomic::Ordering::Acquire) {
@@ -223,8 +223,12 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
 
     if is_audio {
         let ctrl = audio_control.as_ref().unwrap();
-        while let audio::Status::Running = *ctrl.status.lock().unwrap() {
-            thread::sleep(Duration::from_millis(10));
+        loop {
+            let status = *ctrl.status.lock().unwrap();
+            match status {
+                audio::Status::Running => thread::sleep(Duration::from_millis(10)),
+                audio::Status::Finish => break,
+            }
         }
     }
 
