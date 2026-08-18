@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic},
     time::Duration,
 };
 
@@ -23,26 +23,44 @@ pub enum InitOpts {
     Best,
 }
 
+/// Instead of set `status` to false immedietly when `queue` and `consumer` is empty.
+///
+/// This will only set `status` to false if `queue` and `consumer` is empty for `TOLERANT` continuos times
+const TOLERANT: usize = 3;
+
 /// ## Notice
-/// Audio required decoder to send data that matches `audio_config`.
+/// Audio required decoder to send resampled data that matches `audio_config`.
 ///
 /// Audio will play nothing if `recv` fail.
-/// ### Arguments
+///
+/// Internally, audio has its own batching queue so, you should check if `status` is false which indicates all queue is empty to exit safely.
+///
+/// If `status` is false, `audio_stream` **will play nothing** until `status` is set back to true.
+///
+/// ## Arguments
 /// `InitOpts::Default` will use `cpal`'s default device and config
 ///
 /// `InitOpts::Best` will try to find the best device
-/// with the best config using `cpal`'s `cmp_default_heuristics`
-/// ### Usage
+/// with the best config using `cpal`'s `cmp_default_heuristics`.
+///
+/// ## Usage
 /// ```rust
-/// let (audio_stream, audio_config) = audio_init(audio_consumer, InitOpts::Default);
+/// let (audio_stream, audio_config, audio_status) = audio_init(audio_consumer, InitOpts::Default);
 /// ```
 pub fn audio_init(
     consumer: Receiver<frame::Audio>,
     init_opts: InitOpts,
-) -> Result<(cpal::Stream, cpal::SupportedStreamConfig), Error> {
+) -> Result<
+    (
+        cpal::Stream,
+        cpal::SupportedStreamConfig,
+        Arc<atomic::AtomicBool>,
+    ),
+    Error,
+> {
     let (device, config) = cpal_init(init_opts)?;
 
-    let stream = match config.sample_format() {
+    let (stream, status) = match config.sample_format() {
         SampleFormat::U8 => build_audio::<u8>(device, config.into(), consumer),
         SampleFormat::I16 => build_audio::<i16>(device, config.into(), consumer),
         SampleFormat::I32 => build_audio::<i32>(device, config.into(), consumer),
@@ -54,65 +72,90 @@ pub fn audio_init(
         }
     }?;
 
-    Ok((stream, config))
+    Ok((stream, config, status))
 }
 
 fn build_audio<T>(
     device: cpal::Device,
     config: cpal::StreamConfig,
     consumer: Receiver<frame::Audio>,
-) -> Result<cpal::Stream, Error>
+) -> Result<(cpal::Stream, Arc<atomic::AtomicBool>), Error>
 where
     T: frame::audio::Sample + cpal::SizedSample + std::marker::Send + 'static + From<u8>,
 {
     let mut queue = VecDeque::new();
 
-    let stream = device.build_output_stream(
-        config,
-        move |data: &mut [T], _| {
-            while queue.len() < data.len() {
-                match consumer.recv_timeout(Duration::from_millis(1)) {
-                    Ok(audio) => {
-                        let mut len = audio.samples() * audio.channels() as usize;
+    // `sample_rate` is like `fps` but for audio.
+    // So `1 / sample_rate` is audio equivalent of `frame_time`.
+    // We have at most `avail_dur` to process before data got underrun.
+    let avail_dur = 1.0 / config.sample_rate as f64;
 
-                        if len > audio.data(0).len() {
-                            len = audio.data(0).len();
-                        }
+    let mut i = 0;
+    let status = Arc::new(atomic::AtomicBool::new(true));
 
-                        let misalignment = len % size_of::<T>();
-                        if misalignment > 0 {
-                            len -= misalignment;
-                        }
-
-                        // SAFETY:
-                        assert!(len <= audio.data(0).len());
-                        assert!(len % size_of::<T>() == 0);
-                        queue.extend(unsafe {
-                            std::slice::from_raw_parts(audio.data(0).as_ptr() as *const T, len)
-                        });
-                    }
-                    Err(RecvTimeoutError::Timeout) => {
-                        eprintln!("Audio: A buffer underrun occurred.");
-                        break;
-                    }
-                    _ => break,
+    let stream = {
+        let status = status.clone();
+        device.build_output_stream(
+            config,
+            move |data: &mut [T], _| {
+                // don't run anything if `status` is already false
+                if !status.load(atomic::Ordering::Acquire) {
+                    return;
                 }
-            }
 
-            let n = usize::min(queue.len(), data.len());
+                while queue.len() < data.len() {
+                    match consumer.recv_timeout(Duration::from_secs_f64(avail_dur / 2.0)) {
+                        Ok(audio) => {
+                            let mut len = audio.samples() * audio.channels() as usize;
 
-            // unwrap is safe here. We already check for `n`
-            for dst in data[..n].iter_mut() {
-                *dst = queue.pop_front().unwrap();
-            }
+                            if len > audio.data(0).len() {
+                                len = audio.data(0).len();
+                            }
 
-            data[n..].fill(T::from(0));
-        },
-        |e| eprintln!("Audio: {e}"),
-        None,
-    )?;
+                            let misalignment = len % size_of::<T>();
+                            if misalignment > 0 {
+                                len -= misalignment;
+                            }
 
-    Ok(stream)
+                            // SAFETY:
+                            assert!(len <= audio.data(0).len());
+                            assert!(len % size_of::<T>() == 0);
+                            queue.extend(unsafe {
+                                std::slice::from_raw_parts(audio.data(0).as_ptr() as *const T, len)
+                            });
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            eprintln!("Audio: A buffer underrun occurred.");
+                            break;
+                        }
+                        _ => break,
+                    }
+                }
+
+                let n = usize::min(queue.len(), data.len());
+
+                // unwrap is safe here. We already check for `n`
+                for dst in data[..n].iter_mut() {
+                    *dst = queue.pop_front().unwrap();
+                }
+
+                data[n..].fill(T::from(0));
+
+                if queue.is_empty() && consumer.is_empty() {
+                    i += 1;
+                    if i >= TOLERANT {
+                        status.store(false, atomic::Ordering::Release);
+                    }
+                } else {
+                    i = 0;
+                }
+            },
+            |e| eprintln!("Audio: {e}"),
+            None,
+        )
+    }?;
+
+    Ok((stream, status))
 }
 
 fn cpal_init(opts: InitOpts) -> Result<(cpal::Device, cpal::SupportedStreamConfig), Error> {

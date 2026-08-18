@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use cpal::traits::StreamTrait;
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
 use minifb::{Window, WindowOptions};
@@ -39,12 +38,12 @@ pub struct Video {
 
     consumer: Receiver<frame::Video>,
 
-    is_paused: bool,
+    pub is_paused: bool,
 }
 
 impl Video {
     /// Create a new `Video` to handle video rendering.
-    /// ### Usage
+    /// ## Usage
     /// ```rust
     /// let mut video = Video::new(width, height, fps, video_cons);
     /// ```
@@ -61,26 +60,14 @@ impl Video {
         }
     }
 
-    /// **Try** to pause the video
-    pub fn pause(&mut self, audio_stream: &cpal::Stream) -> Result<(), Error> {
-        if self.is_paused {
-            audio_stream.play()?;
-            self.is_paused = false;
-        } else {
-            self.is_paused = true;
-            audio_stream.pause()?;
-        }
-        Ok(())
-    }
-
-    /// pull frame from decoder -> scale the frame -> display -> return `Ok(window.is_open())`
-    /// ### Notice
+    /// pull frame from decoder -> scale the frame -> display -> return `Ok(true)`
+    /// ## Notice
     /// `update` will not update anything if it's paused or `recv` timeout.
     ///
-    /// return `Ok(false)` if `recv` return error
+    /// return `Ok(false)` if `recv` return error.
     ///
-    /// return `Err(Error::Exit)` if `window.is_open()` is false
-    /// ### Usage
+    /// return `Err(Error::Exit)` if `window.is_open()` is false.
+    /// ## Usage
     /// ```rust
     /// while video.update(&mut window)? {
     ///     /* handle keyboard inputs */
@@ -145,13 +132,15 @@ fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
 
 /// Scale dynamically to fit the window.
 ///
-/// Example:
+/// ## Example:
 /// ```rust
 /// let (scaled_buf, new_width, new_height) = scale_to_fit(window, &buf, width, height);
 /// ```
 fn scale_to_fit(window: &Window, buf: &[u32], width: u32, height: u32) -> (Vec<u32>, u32, u32) {
     assert!(width <= WIDTH_LIMIT as u32);
     assert!(height <= HEIGHT_LIMIT as u32);
+
+    // Use stander 16x16 fixed-point number
 
     let scalar = {
         let (target_width, target_height) = window.get_size();
