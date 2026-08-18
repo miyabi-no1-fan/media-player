@@ -1,6 +1,11 @@
 extern crate ffmpeg_next as ffmpeg;
 
-use std::{sync::atomic, thread, time::Duration};
+use std::{
+    io::Write,
+    sync::{Arc, atomic},
+    thread,
+    time::Duration,
+};
 
 use cpal::traits::StreamTrait;
 use minifb::{Key, KeyRepeat, Window};
@@ -100,6 +105,11 @@ fn main() {
 fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
     let (decoder, fps, width, height) = Decoder::new(&path)?;
 
+    let duration = decoder.duration();
+    if duration == 0 {
+        return Ok(window);
+    }
+
     let mut is_video = fps.is_some() && width.is_some() && height.is_some();
 
     let fps = if is_video {
@@ -153,6 +163,26 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
         }
     };
 
+    let is_paused = Arc::new(atomic::AtomicBool::new(false));
+    {
+        let is_paused = is_paused.clone();
+        thread::spawn(move || {
+            let mut time = 0;
+            while time <= duration {
+                print!("\x1B[1A");
+                print!("\x1B[2K");
+                print!("\r");
+                println!("{time} / {duration}");
+                let _ = std::io::stdout().flush();
+                thread::sleep(Duration::from_secs_f64(1.0));
+                while is_paused.load(atomic::Ordering::Acquire) {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                time += 1;
+            }
+        });
+    }
+
     if is_audio {
         audio_stream.as_ref().unwrap().play()?;
     }
@@ -168,6 +198,7 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
                 match key {
                     Key::Space => {
                         video.is_paused = !video.is_paused;
+                        is_paused.fetch_not(atomic::Ordering::AcqRel);
                         if is_audio {
                             audio_status
                                 .as_ref()
@@ -180,9 +211,6 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
                     _ => {}
                 }
             }
-            // TODO: Add a progress bar.
-            // On Hyprland, `minifb` window does not show the mouse cursor.
-            // So it's better to show the progress bar in the terminal instead.
         }
     }
 

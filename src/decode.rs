@@ -107,6 +107,10 @@ impl Decoder {
         ))
     }
 
+    pub fn duration(&self) -> i64 {
+        ffmpeg::Rescale::rescale(&self.ictx.duration(), ffmpeg::rescale::TIME_BASE, (1, 1))
+    }
+
     /// Spawn 1 thread to start decoding.
     ///
     /// ## Notice
