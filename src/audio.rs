@@ -11,7 +11,7 @@ use cpal::{
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
 
-use crate::Error;
+use crate::{DEBUG, Error};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -68,6 +68,11 @@ pub fn audio_init(
     init_opts: InitOpts,
 ) -> Result<(cpal::Stream, cpal::SupportedStreamConfig, Arc<Control>), Error> {
     let (device, config) = cpal_init(init_opts)?;
+
+    if DEBUG {
+        println!("audio device: {device:#?}");
+        println!("audio config: {config:#?}");
+    }
 
     let (stream, ctrl) = match config.sample_format() {
         SampleFormat::U8 => build_audio::<u8>(device, config.into(), consumer),
@@ -135,7 +140,9 @@ where
                                 });
                             }
                             Err(RecvTimeoutError::Timeout) => {
-                                eprintln!("Audio: A buffer underrun occurred.");
+                                if DEBUG {
+                                    eprintln!("Audio: A buffer underrun occurred.");
+                                }
                                 break;
                             }
                             Err(_) if queue.is_empty() => {
@@ -161,7 +168,11 @@ where
                     Task::Play => play(),
                 }
             },
-            |e| eprintln!("Audio: {e}"),
+            |e| {
+                if DEBUG {
+                    eprintln!("Audio: {e}")
+                }
+            },
             None,
         )
     }?;
@@ -177,9 +188,8 @@ fn cpal_init(opts: InitOpts) -> Result<(cpal::Device, cpal::SupportedStreamConfi
         .ok_or(Error::Log("No audio output device."))?;
     let default_conf = best_device.default_output_config()?;
 
-    match opts {
-        InitOpts::Default => return Ok((best_device, default_conf)),
-        _ => {}
+    if matches!(opts, InitOpts::Default) {
+        return Ok((best_device, default_conf));
     }
 
     let devices = host.output_devices()?;

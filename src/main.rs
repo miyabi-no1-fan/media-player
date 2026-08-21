@@ -22,6 +22,8 @@ const FPS_LIMIT: usize = 1000;
 
 const DECODE_QUEUE_LEN: usize = 20;
 
+const DEBUG: bool = true;
+
 #[allow(dead_code)]
 enum Error {
     Log(&'static str),
@@ -117,6 +119,12 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
     } else {
         None
     };
+
+    if is_video && DEBUG {
+        println!("width: {}", width.unwrap());
+        println!("height: {}", height.unwrap());
+        println!("fps: {}", fps.unwrap());
+    }
 
     // if we use bounded channel, the decoder would stuck waiting for
     // videos to be consumed while audio is empty

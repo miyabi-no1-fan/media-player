@@ -167,34 +167,33 @@ impl Decoder {
             };
 
             for (stream, packet) in decoder.ictx.packets() {
-                match stream.index() {
-                    i if is_video && i == decoder.video_strm_index.unwrap() => {
-                        decoder
-                            .video_decoder
-                            .as_mut()
-                            .unwrap()
-                            .send_packet(&packet)?;
+                // VIDEO
+                if is_video && stream.index() == decoder.video_strm_index.unwrap() {
+                    decoder
+                        .video_decoder
+                        .as_mut()
+                        .unwrap()
+                        .send_packet(&packet)?;
 
-                        is_video = Self::video_decode(
-                            decoder.video_decoder.as_mut().unwrap(),
-                            scaler.as_mut().unwrap(),
-                            &mut video_prod.as_mut().unwrap(),
-                        )?;
-                    }
-                    i if is_audio && i == decoder.audio_strm_index.unwrap() => {
-                        decoder
-                            .audio_decoder
-                            .as_mut()
-                            .unwrap()
-                            .send_packet(&packet)?;
+                    is_video = Self::video_decode(
+                        decoder.video_decoder.as_mut().unwrap(),
+                        scaler.as_mut().unwrap(),
+                        &mut video_prod.as_mut().unwrap(),
+                    )?;
+                }
+                // AUDIO
+                else if is_audio && stream.index() == decoder.audio_strm_index.unwrap() {
+                    decoder
+                        .audio_decoder
+                        .as_mut()
+                        .unwrap()
+                        .send_packet(&packet)?;
 
-                        is_audio = Self::audio_decode(
-                            decoder.audio_decoder.as_mut().unwrap(),
-                            resampler.as_mut().unwrap(),
-                            audio_prod.as_mut().unwrap(),
-                        )?;
-                    }
-                    _ => {}
+                    is_audio = Self::audio_decode(
+                        decoder.audio_decoder.as_mut().unwrap(),
+                        resampler.as_mut().unwrap(),
+                        audio_prod.as_mut().unwrap(),
+                    )?;
                 }
 
                 if !is_video && !is_audio {
