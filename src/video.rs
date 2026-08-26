@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{thread, time::Duration};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
@@ -38,7 +38,7 @@ pub struct Video {
 
     consumer: Receiver<frame::Video>,
 
-    pub is_paused: bool,
+    is_paused: bool,
 }
 
 impl Video {
@@ -73,21 +73,30 @@ impl Video {
     ///     /* handle keyboard inputs */
     /// }
     /// ```
-    pub fn update(&mut self, window: &mut Window) -> Result<bool, Error> {
-        if self.should_update() {
-            if self.pull_frame().is_none() {
-                return Ok(false);
+    pub fn update(&mut self, window: Option<&mut Window>) -> Result<bool, Error> {
+        if let Some(window) = window {
+            if self.should_update() {
+                if self.pull_frame().is_none() {
+                    return Ok(false);
+                }
             }
-        }
 
-        let (scaled_buf, scaled_width, scaled_height) =
-            scale_to_fit(window, &self.buf, self.width, self.height);
-        window.update_with_buffer(&scaled_buf, scaled_width as usize, scaled_height as usize)?;
+            let (scaled_buf, scaled_width, scaled_height) =
+                scale_to_fit(window, &self.buf, self.width, self.height);
+            window.update_with_buffer(
+                &scaled_buf,
+                scaled_width as usize,
+                scaled_height as usize,
+            )?;
 
-        if window.is_open() {
-            Ok(true)
+            if window.is_open() {
+                Ok(true)
+            } else {
+                Err(Error::Exit)
+            }
         } else {
-            Err(Error::Exit)
+            thread::sleep(Duration::from_secs_f64(self.frame_time));
+            Ok(true)
         }
     }
 
@@ -106,6 +115,10 @@ impl Video {
 
     fn should_update(&self) -> bool {
         !self.is_paused
+    }
+
+    pub fn toggle_pause(&mut self) {
+        self.is_paused = !self.is_paused;
     }
 }
 
