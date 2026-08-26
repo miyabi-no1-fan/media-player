@@ -36,6 +36,8 @@ pub enum Status {
 pub enum Task {
     Pause,
     Play,
+    Flush,
+    FlushOk,
 }
 
 #[derive(Debug)]
@@ -163,9 +165,15 @@ where
                     data[n..].fill(T::from(0));
                 };
 
-                match *ctrl.task.lock().unwrap() {
-                    Task::Pause => data.fill(T::from(0)),
+                let mut task = ctrl.task.lock().unwrap();
+                match *task {
+                    Task::Pause | Task::FlushOk => data.fill(T::from(0)),
                     Task::Play => play(),
+                    Task::Flush => {
+                        queue.clear();
+                        *task = Task::FlushOk;
+                        data.fill(T::from(0));
+                    }
                 }
             },
             |e| {
