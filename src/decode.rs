@@ -297,6 +297,8 @@ impl Decoder {
                         }
                     }
 
+                    *control.status.lock().unwrap() = Status::Finish;
+
                     if is_video {
                         decoder.video_decoder.as_mut().unwrap().send_eof()?;
                         Self::video_decode(
@@ -317,8 +319,6 @@ impl Decoder {
                             audio_prod.as_mut().unwrap(),
                         )?;
                     }
-
-                    *control.status.lock().unwrap() = Status::Finish;
 
                     Ok(())
                 })
