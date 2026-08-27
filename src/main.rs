@@ -219,8 +219,8 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
                         let target_sec = {
                             let current_sec = (current_frame / fps) as i64;
                             match key {
-                                Key::Right => (current_sec + 10).clamp(0, duration),
-                                Key::Left => (current_sec - 10).clamp(0, duration),
+                                Key::Right => (current_sec + 10).clamp(0, duration - 1),
+                                Key::Left => (current_sec - 10).clamp(0, duration - 1),
                                 _ => panic!("Unhandled key"),
                             }
                         };
