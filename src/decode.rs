@@ -1,8 +1,11 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
+use crossbeam_channel::Receiver;
+use crossbeam_channel::SendTimeoutError;
 use crossbeam_channel::Sender;
 use ffmpeg::ChannelLayout;
 use ffmpeg::codec;
@@ -12,7 +15,7 @@ use ffmpeg::format::sample::Type as SampleType;
 use ffmpeg::frame;
 use ffmpeg::media;
 
-use crate::DECODE_QUEUE_LEN;
+use crate::DECODE_PACKET_QUEUE_LEN;
 use crate::Error;
 use crate::FPS_LIMIT;
 use crate::HEIGHT_LIMIT;
@@ -30,6 +33,7 @@ pub enum Status {
 pub enum Task {
     Play,
     Seek(i64),
+    Flush,
 }
 
 #[derive(Debug)]
@@ -144,8 +148,8 @@ impl Decoder {
     pub fn decode(
         mut decoder: Decoder,
         audio_config: Option<cpal::SupportedStreamConfig>,
-        mut video_prod: Option<Sender<frame::Video>>,
-        mut audio_prod: Option<Sender<frame::Audio>>,
+        video_prod: Option<Sender<frame::Video>>,
+        audio_prod: Option<Sender<frame::Audio>>,
     ) -> (thread::JoinHandle<Result<(), Error>>, Arc<Control>) {
         let control = Arc::new(Control {
             task: Mutex::new(Task::Play),
@@ -165,33 +169,32 @@ impl Decoder {
                         && audio_config.is_some()
                         && audio_prod.is_some();
 
-                    let mut scaler = if is_video {
-                        Some(ffmpeg::software::scaling::Context::get(
-                            decoder.video_decoder.as_ref().unwrap().format(),
-                            decoder.video_decoder.as_ref().unwrap().width(),
-                            decoder.video_decoder.as_ref().unwrap().height(),
-                            if is_little_endian() {
-                                format::Pixel::BGRZ
-                            } else {
-                                format::Pixel::ZRGB
-                            }, // somehow, ZRGB32 does not work
-                            decoder.video_decoder.as_ref().unwrap().width(),
-                            decoder.video_decoder.as_ref().unwrap().height(),
-                            ffmpeg::software::scaling::flag::Flags::BILINEAR,
-                        )?)
+                    let video_decode_task = Arc::new(Mutex::new(None));
+                    let audio_decode_task = Arc::new(Mutex::new(None));
+
+                    let video_packet_prod = if is_video {
+                        let (video_decode_pod, video_decode_cons) = crossbeam_channel::unbounded();
+                        Self::video_decode(
+                            decoder.video_decoder.unwrap(),
+                            video_prod.unwrap(),
+                            video_decode_cons,
+                            Arc::clone(&video_decode_task),
+                        );
+                        Some(video_decode_pod)
                     } else {
                         None
                     };
 
-                    let mut resampler = if is_audio {
-                        Some(ffmpeg::software::resampling::Context::get(
-                            decoder.audio_decoder.as_ref().unwrap().format(),
-                            decoder.audio_decoder.as_ref().unwrap().channel_layout(),
-                            decoder.audio_decoder.as_ref().unwrap().rate(),
-                            audio_config.unwrap().sample_format().as_ffmpeg_sample(),
-                            ChannelLayout::default(audio_config.unwrap().channels().into()),
-                            audio_config.unwrap().sample_rate(),
-                        )?)
+                    let audio_packet_prod = if is_audio {
+                        let (audio_decode_prod, audio_decode_cons) = crossbeam_channel::unbounded();
+                        Self::audio_decode(
+                            decoder.audio_decoder.unwrap(),
+                            audio_prod.unwrap(),
+                            audio_decode_cons,
+                            audio_config.unwrap(),
+                            Arc::clone(&audio_decode_task),
+                        );
+                        Some(audio_decode_prod)
                     } else {
                         None
                     };
@@ -212,60 +215,33 @@ impl Decoder {
                                 );
                                 decoder.ictx.seek(position, ..position)?;
 
-                                if is_video {
-                                    decoder.video_decoder.as_mut().unwrap().flush();
-                                }
+                                *video_decode_task.lock().unwrap() = Some(Task::Flush);
+                                *audio_decode_task.lock().unwrap() = Some(Task::Flush);
 
-                                if is_audio {
-                                    decoder.audio_decoder.as_mut().unwrap().flush();
-                                    Self::audio_flush(
-                                        resampler.as_mut().unwrap(),
-                                        audio_prod.as_mut().unwrap(),
-                                    )?;
+                                while (is_video && !video_packet_prod.as_ref().unwrap().is_empty())
+                                    || (is_audio && !audio_packet_prod.as_ref().unwrap().is_empty())
+                                {
+                                    thread::sleep(Duration::from_micros(10));
                                 }
 
                                 *task = Task::Play;
                                 drop(task);
-
-                                while (is_audio && !audio_prod.as_ref().unwrap().is_empty())
-                                    || (is_video && !video_prod.as_ref().unwrap().is_empty())
-                                {
-                                    thread::sleep(Duration::from_micros(10));
-                                }
                             }
+                            _ => panic!("Unknown decode task"),
                         }
 
                         let Some((stream, packet)) = decoder.ictx.packets().next() else {
                             break; // <- natural break
                         };
 
-                        // VIDEO
                         if is_video && stream.index() == decoder.video_strm_index.unwrap() {
-                            decoder
-                                .video_decoder
-                                .as_mut()
-                                .unwrap()
-                                .send_packet(&packet)?;
-
-                            is_video = Self::video_decode(
-                                decoder.video_decoder.as_mut().unwrap(),
-                                scaler.as_mut().unwrap(),
-                                &mut video_prod.as_mut().unwrap(),
-                            )?;
-                        }
-                        // AUDIO
-                        else if is_audio && stream.index() == decoder.audio_strm_index.unwrap() {
-                            decoder
-                                .audio_decoder
-                                .as_mut()
-                                .unwrap()
-                                .send_packet(&packet)?;
-
-                            is_audio = Self::audio_decode(
-                                decoder.audio_decoder.as_mut().unwrap(),
-                                resampler.as_mut().unwrap(),
-                                audio_prod.as_mut().unwrap(),
-                            )?;
+                            if let Some(prod) = video_packet_prod.as_ref() {
+                                is_video = prod.send(packet).is_ok();
+                            }
+                        } else if is_audio && stream.index() == decoder.audio_strm_index.unwrap() {
+                            if let Some(prod) = audio_packet_prod.as_ref() {
+                                is_audio = prod.send(packet).is_ok();
+                            }
                         }
 
                         if !is_video && !is_audio {
@@ -274,51 +250,30 @@ impl Decoder {
 
                         loop {
                             let v = if is_video {
-                                video_prod.as_ref().unwrap().len()
+                                video_packet_prod.as_ref().unwrap().len()
                             } else {
                                 usize::MAX
                             };
 
                             let a = if is_audio {
-                                audio_prod.as_ref().unwrap().len()
+                                audio_packet_prod.as_ref().unwrap().len()
                             } else {
                                 usize::MAX
                             };
 
                             if matches!(*control.status.lock().unwrap(), Status::Finish)
                                 || !matches!(*control.task.lock().unwrap(), Task::Play)
-                                || v <= DECODE_QUEUE_LEN
-                                || a <= DECODE_QUEUE_LEN
+                                || v <= DECODE_PACKET_QUEUE_LEN
+                                || a <= DECODE_PACKET_QUEUE_LEN
                             {
                                 break;
                             }
 
-                            thread::sleep(Duration::from_micros(50)); // just a random value that works
+                            thread::sleep(Duration::from_micros(10));
                         }
                     }
 
                     *control.status.lock().unwrap() = Status::Finish;
-
-                    if is_video {
-                        decoder.video_decoder.as_mut().unwrap().send_eof()?;
-                        Self::video_decode(
-                            decoder.video_decoder.as_mut().unwrap(),
-                            scaler.as_mut().unwrap(),
-                            video_prod.as_mut().unwrap(),
-                        )?;
-                    }
-                    if is_audio {
-                        decoder.audio_decoder.as_mut().unwrap().send_eof()?;
-                        Self::audio_decode(
-                            decoder.audio_decoder.as_mut().unwrap(),
-                            resampler.as_mut().unwrap(),
-                            audio_prod.as_mut().unwrap(),
-                        )?;
-                        Self::audio_flush(
-                            resampler.as_mut().unwrap(),
-                            audio_prod.as_mut().unwrap(),
-                        )?;
-                    }
 
                     Ok(())
                 })
@@ -327,53 +282,157 @@ impl Decoder {
         )
     }
 
-    /// return `Ok(is_video)`
     fn video_decode(
-        decoder: &mut decoder::Video,
-        scaler: &mut ffmpeg::software::scaling::Context,
-        video_prod: &mut Sender<frame::Video>,
-    ) -> Result<bool, Error> {
-        let mut is_video = true;
-        loop {
-            let mut decoded = frame::Video::empty();
+        mut decoder: decoder::Video,
+        video_prod: Sender<frame::Video>,
+        packet_cons: Receiver<ffmpeg::packet::Packet>,
+        task: Arc<Mutex<Option<Task>>>,
+    ) -> JoinHandle<Result<(), Error>> {
+        thread::spawn(move || {
+            let mut scaler = ffmpeg::software::scaling::Context::get(
+                decoder.format(),
+                decoder.width(),
+                decoder.height(),
+                if is_little_endian() {
+                    format::Pixel::BGRZ
+                } else {
+                    format::Pixel::ZRGB
+                }, // somehow, ZRGB32 does not work
+                decoder.width(),
+                decoder.height(),
+                ffmpeg::software::scaling::flag::Flags::BILINEAR,
+            )?;
 
-            if decoder.receive_frame(&mut decoded).is_err() {
-                break;
+            let receive_and_process_decoded_frames =
+                |decoder: &mut ffmpeg::decoder::Video,
+                 scaler: &mut ffmpeg::software::scaling::Context|
+                 -> Result<(), Error> {
+                    let mut decoded = frame::Video::empty();
+                    while decoder.receive_frame(&mut decoded).is_ok() {
+                        let mut frame = frame::Video::empty();
+                        scaler.run(&decoded, &mut frame)?;
+
+                        loop {
+                            if (*task.lock().unwrap()).is_some() {
+                                break;
+                            }
+                            match video_prod.send_timeout(frame, Duration::from_micros(10)) {
+                                Ok(()) => break,
+                                Err(SendTimeoutError::Timeout(f)) => frame = f,
+                                _ => return Ok(()),
+                            }
+                        }
+                    }
+                    Ok(())
+                };
+
+            while let Ok(packet) = packet_cons.recv() {
+                decoder.send_packet(&packet)?;
+                receive_and_process_decoded_frames(&mut decoder, &mut scaler)?;
+
+                let mut task = task.lock().unwrap();
+                if let Some(t) = *task {
+                    match t {
+                        Task::Flush => {
+                            decoder.flush();
+
+                            while !packet_cons.is_empty() {
+                                let _ = packet_cons.try_recv();
+                            }
+
+                            while !video_prod.is_empty() {
+                                thread::sleep(Duration::from_micros(10));
+                            }
+                        }
+                        _ => panic!("Unknown video decode task"),
+                    }
+                    *task = None;
+                }
             }
 
-            let mut frame = frame::Video::empty();
-            scaler.run(&decoded, &mut frame)?;
+            decoder.send_eof()?;
+            receive_and_process_decoded_frames(&mut decoder, &mut scaler)?;
 
-            is_video = video_prod.send(frame).is_ok();
-        }
-        Ok(is_video)
+            Ok(())
+        })
     }
 
-    /// return `Ok(is_audio)`
     fn audio_decode(
-        decoder: &mut decoder::Audio,
-        resampler: &mut ffmpeg::software::resampling::Context,
-        audio_prod: &mut Sender<frame::Audio>,
-    ) -> Result<bool, Error> {
-        let mut is_audio = true;
-        loop {
-            let mut decoded = frame::Audio::empty();
+        mut decoder: decoder::Audio,
+        audio_prod: Sender<frame::Audio>,
+        packet_cons: Receiver<ffmpeg::packet::Packet>,
+        audio_config: cpal::SupportedStreamConfig,
+        task: Arc<Mutex<Option<Task>>>,
+    ) -> JoinHandle<Result<(), Error>> {
+        thread::spawn(move || {
+            let mut resampler = ffmpeg::software::resampling::Context::get(
+                decoder.format(),
+                decoder.channel_layout(),
+                decoder.rate(),
+                audio_config.sample_format().as_ffmpeg_sample(),
+                ChannelLayout::default(audio_config.channels().into()),
+                audio_config.sample_rate(),
+            )?;
 
-            if decoder.receive_frame(&mut decoded).is_err() {
-                break;
+            let receive_and_process_decoded_frames =
+                |decoder: &mut ffmpeg::decoder::Audio,
+                 resampler: &mut ffmpeg::software::resampling::Context|
+                 -> Result<(), Error> {
+                    let mut decoded = frame::Audio::empty();
+                    while decoder.receive_frame(&mut decoded).is_ok() {
+                        let mut frame = frame::Audio::empty();
+                        resampler.run(&decoded, &mut frame)?;
+
+                        loop {
+                            if (*task.lock().unwrap()).is_some() {
+                                break;
+                            }
+                            match audio_prod.send_timeout(frame, Duration::from_micros(10)) {
+                                Ok(()) => break,
+                                Err(SendTimeoutError::Timeout(f)) => frame = f,
+                                _ => return Ok(()),
+                            }
+                        }
+                    }
+                    Ok(())
+                };
+
+            while let Ok(packet) = packet_cons.recv() {
+                decoder.send_packet(&packet)?;
+                receive_and_process_decoded_frames(&mut decoder, &mut resampler)?;
+
+                let mut task = task.lock().unwrap();
+                if let Some(t) = *task {
+                    match t {
+                        Task::Flush => {
+                            decoder.flush();
+                            Self::audio_flush(&mut resampler, None)?;
+
+                            while !packet_cons.is_empty() {
+                                let _ = packet_cons.try_recv();
+                            }
+
+                            while !audio_prod.is_empty() {
+                                thread::sleep(Duration::from_micros(10));
+                            }
+                        }
+                        _ => panic!("Unknown video decode task"),
+                    }
+                    *task = None;
+                }
             }
 
-            let mut frame = frame::Audio::empty();
-            resampler.run(&decoded, &mut frame)?;
+            decoder.send_eof()?;
+            receive_and_process_decoded_frames(&mut decoder, &mut resampler)?;
+            Self::audio_flush(&mut resampler, Some(&audio_prod))?;
 
-            is_audio = audio_prod.send(frame).is_ok();
-        }
-        Ok(is_audio)
+            Ok(())
+        })
     }
 
     fn audio_flush(
         resampler: &mut ffmpeg::software::resampling::Context,
-        audio_prod: &mut Sender<frame::Audio>,
+        audio_prod: Option<&Sender<frame::Audio>>,
     ) -> Result<(), Error> {
         loop {
             let mut frame = frame::Audio::new(
@@ -387,8 +446,10 @@ impl Decoder {
                 break;
             }
 
-            if audio_prod.send(frame).is_err() {
-                break;
+            if let Some(audio_prod) = audio_prod {
+                if audio_prod.send(frame).is_err() {
+                    break;
+                }
             }
         }
         Ok(())

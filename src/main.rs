@@ -19,7 +19,9 @@ const DEFAULT_FPS: usize = 60;
 const DEFAULT_WIDTH: u32 = 1920;
 const DEFAULT_HEIGHT: u32 = 1080;
 
-const DECODE_QUEUE_LEN: usize = 20;
+const DECODE_PACKET_QUEUE_LEN: usize = 2;
+const DECODE_VIDEO_QUEUE_LEN: usize = 2;
+const DECODE_AUDIO_QUEUE_LEN: usize = 2;
 
 const DEBUG: bool = true;
 
@@ -130,8 +132,8 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
 
     // if we use bounded channel, the decoder would stuck waiting for
     // videos to be consumed while audio is empty
-    let (video_prod, video_cons) = crossbeam_channel::unbounded();
-    let (audio_prod, audio_cons) = crossbeam_channel::unbounded();
+    let (video_prod, video_cons) = crossbeam_channel::bounded(DECODE_VIDEO_QUEUE_LEN);
+    let (audio_prod, audio_cons) = crossbeam_channel::bounded(DECODE_AUDIO_QUEUE_LEN);
 
     // we'll run no audio if `audio_init` failed
     let (audio_stream, audio_config, audio_control) =
@@ -146,8 +148,8 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
         Decoder::decode(decoder, audio_config, Some(video_prod), Some(audio_prod));
 
     // waiting for the few first frame to be ready
-    while (is_video && video_cons.len() <= DECODE_QUEUE_LEN)
-        || (is_audio && audio_cons.len() <= DECODE_QUEUE_LEN)
+    while (is_video && video_cons.len() < DECODE_VIDEO_QUEUE_LEN / 2)
+        || (is_audio && audio_cons.len() < DECODE_AUDIO_QUEUE_LEN / 2)
     {
         thread::sleep(Duration::from_millis(10));
     }
