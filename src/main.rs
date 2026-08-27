@@ -23,7 +23,7 @@ const DECODE_PACKET_QUEUE_LEN: usize = 2;
 const DECODE_VIDEO_QUEUE_LEN: usize = 2;
 const DECODE_AUDIO_QUEUE_LEN: usize = 2;
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 #[allow(dead_code)]
 enum Error {
@@ -31,6 +31,10 @@ enum Error {
     Decode(ffmpeg::Error),
     Audio(cpal::Error),
     Window(minifb::Error),
+
+    /// Restart(secs), recall `run` with skip = secs
+    Restart(i64),
+
     /// indicate that the app should exit
     Exit,
 }
@@ -63,11 +67,11 @@ fn main() {
             }
             "--repeat" | "-r" => {
                 let Some(v) = args.next() else {
-                    eprintln!("Invalid argument. Expect a positive number after {arg} flag");
+                    eprintln!("Invalid argument. Expect a positive integer after {arg} flag");
                     std::process::exit(1);
                 };
                 let Ok(num) = v.parse::<u32>() else {
-                    eprintln!("Invalid argument. Expect a positive number after {arg} flag");
+                    eprintln!("Invalid argument. Expect a positive integer after {arg} flag");
                     std::process::exit(1);
                 };
                 if num == 0 {
@@ -94,26 +98,35 @@ fn main() {
 
     let mut window = None;
 
-    for _ in 0..repeat {
-        window = match run(path.clone(), window, no_window) {
-            Ok(window) => window,
+    let mut skip = None;
+
+    let mut i: isize = 0;
+    while (i as usize) < repeat {
+        match run(path.clone(), &mut window, no_window, skip.unwrap_or(0)) {
+            Ok(()) => {}
             Err(err) => match err {
                 Error::Exit => break,
+                Error::Restart(secs) => {
+                    skip = Some(secs);
+                    continue;
+                }
                 err => {
                     eprintln!("{err:?}");
                     std::process::exit(1);
                 }
             },
         };
+        skip = None;
+        i += 1;
     }
 }
 
-fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<Window>, Error> {
-    let (decoder, fps, width, height) = Decoder::new(&path)?;
+fn run(path: String, window: &mut Option<Window>, no_window: bool, skip: i64) -> Result<(), Error> {
+    let (decoder, fps, width, height) = Decoder::new(&path, skip)?;
 
     let duration = decoder.duration();
     if duration == 0 {
-        return Ok(window);
+        return Ok(());
     }
 
     let is_video = fps.is_some() && width.is_some() && height.is_some();
@@ -161,11 +174,9 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
     // if window is some, use the window,
     // else, create a new window,
     // if create new window fail, fallback to no video.
-    let mut window = match window {
-        Some(window) => Some(window),
-        None if !no_window => video::new_window(path.as_str(), fps, width, height).ok(),
-        _ => None,
-    };
+    if window.is_none() && !no_window {
+        *window = video::new_window(path.as_str(), fps, width, height).ok();
+    }
 
     if is_audio {
         audio_stream.as_ref().unwrap().play()?;
@@ -173,7 +184,7 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
 
     let mut video = Video::new(width, height, fps, video_cons.clone());
 
-    let mut current_frame = 0;
+    let mut current_frame = skip as usize * fps;
 
     // update will exit if window is close or
     // if `video_cons` can't `recv` any frames more
@@ -259,6 +270,11 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
                         }
                     }
 
+                    Key::R => {
+                        let current_sec = (current_frame / fps) as i64;
+                        return Err(Error::Restart(current_sec - 1));
+                    }
+
                     _ => {}
                 }
             }
@@ -301,7 +317,7 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
         }
     }
 
-    Ok(window)
+    Ok(())
 }
 
 impl From<ffmpeg::Error> for Error {
@@ -329,7 +345,7 @@ impl std::fmt::Debug for Error {
             Self::Decode(e) => write!(f, "Decode Error: {e:?}"),
             Self::Window(e) => write!(f, "Window Error: {e:?}"),
             Self::Audio(e) => write!(f, "Audio Error: {e:?}"),
-            Self::Exit => panic!("Idiot, why would you print this error?"),
+            _ => panic!("This error kind is not supposed to print"),
         }
     }
 }

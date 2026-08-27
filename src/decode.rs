@@ -61,12 +61,22 @@ impl Decoder {
     ///     let (fps, width, height) = (fps.unwrap(), width.unwrap(), height.unwrap());
     /// }
     /// ```
-    pub fn new<P>(path: &P) -> Result<(Self, Option<f64>, Option<u32>, Option<u32>), Error>
+    pub fn new<P>(
+        path: &P,
+        secs: i64,
+    ) -> Result<(Self, Option<f64>, Option<u32>, Option<u32>), Error>
     where
         P: AsRef<std::path::Path> + ?Sized,
     {
         ffmpeg::init()?;
-        let ictx = ffmpeg::format::input(path)?;
+        let mut ictx = ffmpeg::format::input(path)?;
+
+        if 0 < secs
+            && secs < ffmpeg::Rescale::rescale(&ictx.duration(), ffmpeg::rescale::TIME_BASE, (1, 1))
+        {
+            let position = ffmpeg::Rescale::rescale(&secs, (1, 1), ffmpeg::rescale::TIME_BASE);
+            ictx.seek(position, ..position)?;
+        }
 
         let audio_strm = ictx.streams().best(media::Type::Audio);
         let (audio_strm_index, audio_decoder) = match audio_strm.as_ref() {
