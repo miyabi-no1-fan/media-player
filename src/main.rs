@@ -271,10 +271,14 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
         if current_sec == duration as usize {
             break;
         }
-        current_frame += 1;
+
+        if !video.is_paused() {
+            current_frame += 1;
+        }
     }
 
     // join decoder thread to check for errors
+    *decoder_control.status.lock().unwrap() = decode::Status::Finish;
     handle
         .join()
         .expect("Couldn't join on the associated thread")?;
