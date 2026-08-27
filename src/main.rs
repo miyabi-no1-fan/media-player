@@ -263,17 +263,22 @@ fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<W
         }
 
         let current_sec = current_frame / fps;
+
         if current_frame % fps == 0 {
             print!("\x1B[1F\x1B[2K\r");
             println!("{current_sec} / {duration} sec");
             std::io::stdout().flush().unwrap();
         }
+
         if current_sec == duration as usize {
-            break;
+            if window.is_none() || (window.is_some() && video_cons.is_empty()) {
+                break;
+            }
         }
 
         if !video.is_paused() {
             current_frame += 1;
+            current_frame = current_frame.clamp(0, duration as usize * fps);
         }
     }
 
