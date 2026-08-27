@@ -37,12 +37,14 @@ fn help() {
     println!("media-player\nUsage: media-player [media file]");
     println!("Options:");
     println!("--help | -h          Print the this help description.");
-    println!("--repeat | -r [n]    Repeat n times. Repeat forever if n is 0");
+    println!("--repeat | -r [n]    Repeat n times. Repeat forever if n is 0.");
+    println!("--no-window          Don't open a window.");
 }
 
 fn main() {
     let mut path: Option<String> = None;
     let mut repeat = 1;
+    let mut no_window = false;
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -73,6 +75,7 @@ fn main() {
                     repeat = num as usize;
                 }
             }
+            "--no-window" => no_window = true,
             _ if path.is_none() => path = Some(arg),
             _ => {
                 eprintln!("Invalid argument. Unknown argument");
@@ -90,7 +93,7 @@ fn main() {
     let mut window = None;
 
     for _ in 0..repeat {
-        window = match run(path.clone(), window) {
+        window = match run(path.clone(), window, no_window) {
             Ok(window) => window,
             Err(err) => match err {
                 Error::Exit => break,
@@ -103,7 +106,7 @@ fn main() {
     }
 }
 
-fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
+fn run(path: String, window: Option<Window>, no_window: bool) -> Result<Option<Window>, Error> {
     let (decoder, fps, width, height) = Decoder::new(&path)?;
 
     let duration = decoder.duration();
@@ -158,7 +161,8 @@ fn run(path: String, window: Option<Window>) -> Result<Option<Window>, Error> {
     // if create new window fail, fallback to no video.
     let mut window = match window {
         Some(window) => Some(window),
-        None => video::new_window(path.as_str(), fps, width, height).ok(),
+        None if !no_window => video::new_window(path.as_str(), fps, width, height).ok(),
+        _ => None,
     };
 
     if is_audio {
