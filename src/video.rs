@@ -37,7 +37,7 @@ pub struct Video {
     width: u32,
     height: u32,
 
-    frame_time: f64,
+    frame_time: Duration,
     prev_time: Option<Instant>,
 
     consumer: Receiver<frame::Video>,
@@ -58,7 +58,7 @@ impl Video {
             buf: vec![0u32; width as usize * height as usize],
             width,
             height,
-            frame_time: 1.0 / fps as f64,
+            frame_time: Duration::from_secs_f64(1.0 / fps as f64),
             prev_time: None,
             consumer,
             is_paused: false,
@@ -106,10 +106,8 @@ impl Video {
                 Duration::from_secs(0)
             };
 
-            let target = Duration::from_secs_f64(self.frame_time);
-
-            if delta < target {
-                thread::sleep(target - delta);
+            if delta < self.frame_time {
+                thread::sleep(self.frame_time - delta);
             }
 
             self.prev_time = Some(Instant::now());
@@ -120,10 +118,7 @@ impl Video {
 
     /// Return None if there's no more frame to pull
     fn pull_frame(&mut self) -> Option<()> {
-        match self
-            .consumer
-            .recv_timeout(Duration::from_secs_f64(self.frame_time / 2.0))
-        {
+        match self.consumer.recv_timeout(self.frame_time / 2) {
             Ok(video) => self.buf = video_frame_to_vec(&video),
             Err(RecvTimeoutError::Timeout) => {}
             _ => return None,
