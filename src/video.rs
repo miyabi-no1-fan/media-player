@@ -138,6 +138,10 @@ impl Video {
     pub fn toggle_pause(&mut self) {
         self.is_paused = !self.is_paused;
     }
+
+    pub fn is_paused(&self) -> bool {
+        self.is_paused
+    }
 }
 
 /// Assume frame is 0RGB.

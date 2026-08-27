@@ -236,7 +236,7 @@ impl Decoder {
                         }
 
                         let Some((stream, packet)) = decoder.ictx.packets().next() else {
-                            break;
+                            break; // <- natural break
                         };
 
                         // VIDEO
