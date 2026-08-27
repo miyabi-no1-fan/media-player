@@ -1,4 +1,7 @@
-use std::{thread, time::Duration};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
@@ -35,6 +38,7 @@ pub struct Video {
     height: u32,
 
     frame_time: f64,
+    prev_time: Option<Instant>,
 
     consumer: Receiver<frame::Video>,
 
@@ -55,6 +59,7 @@ impl Video {
             width,
             height,
             frame_time: 1.0 / fps as f64,
+            prev_time: None,
             consumer,
             is_paused: false,
         }
@@ -95,7 +100,20 @@ impl Video {
                 Err(Error::Exit)
             }
         } else {
-            thread::sleep(Duration::from_secs_f64(self.frame_time));
+            let delta = if let Some(prev_time) = self.prev_time {
+                prev_time.elapsed()
+            } else {
+                Duration::from_secs(0)
+            };
+
+            let target = Duration::from_secs_f64(self.frame_time);
+
+            if delta < target {
+                thread::sleep(target - delta);
+            }
+
+            self.prev_time = Some(Instant::now());
+
             Ok(true)
         }
     }
