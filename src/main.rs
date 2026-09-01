@@ -65,7 +65,7 @@ fn main() {
     let mut path: Option<String> = None;
     let mut repeat = 1;
     let mut no_window = false;
-    let mut rotate_deg = 0f32;
+    let mut rotate_deg = 0f64;
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -102,7 +102,7 @@ fn main() {
                     eprintln!("Invalid argument. Expect a value after {arg} flag");
                     std::process::exit(1);
                 };
-                let Ok(num) = v.parse::<f32>() else {
+                let Ok(num) = v.parse::<f64>() else {
                     eprintln!("Invalid argument. Expect a value after {arg} flag");
                     std::process::exit(1);
                 };
@@ -158,7 +158,7 @@ fn run(
     window: &mut Option<Window>,
     no_window: bool,
     skip: i64,
-    rotate_deg: f32,
+    rotate_deg: f64,
 ) -> Result<(), Error> {
     let (decoder, fps, width, height) = Decoder::new(&path, skip)?;
 
