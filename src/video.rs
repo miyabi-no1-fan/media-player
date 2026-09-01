@@ -46,7 +46,7 @@ pub struct Video {
     is_paused: bool,
 
     /// angle of rotation in radians
-    rotation: f32,
+    rotation: f64,
 }
 
 impl Video {
@@ -92,8 +92,8 @@ impl Video {
             }
 
             let rotation_mat = [
-                [f32::cos(self.rotation), -f32::sin(self.rotation)],
-                [f32::sin(self.rotation), f32::cos(self.rotation)],
+                [f64::cos(self.rotation), -f64::sin(self.rotation)],
+                [f64::sin(self.rotation), f64::cos(self.rotation)],
             ];
 
             // scalar have to scale the video **after rotated** thus we need rotated width and height
@@ -103,10 +103,10 @@ impl Video {
             // scale dynamically to fit the current window
             let scalar = {
                 let (target_width, target_height) = window.get_size();
-                let width_ratio = target_width.clamp(0, WIDTH_LIMIT) as f32 / rotated_width as f32;
+                let width_ratio = target_width.clamp(0, WIDTH_LIMIT) as f64 / rotated_width as f64;
                 let height_ratio =
-                    target_height.clamp(0, HEIGHT_LIMIT) as f32 / rotated_height as f32;
-                f32::min(width_ratio, height_ratio)
+                    target_height.clamp(0, HEIGHT_LIMIT) as f64 / rotated_height as f64;
+                f64::min(width_ratio, height_ratio)
             };
 
             // merge matrix together
@@ -161,7 +161,7 @@ impl Video {
         self.is_paused
     }
 
-    pub fn set_rotation_angle(&mut self, radians: f32) {
+    pub fn set_rotation_angle(&mut self, radians: f64) {
         self.rotation = radians;
     }
 }
@@ -200,7 +200,7 @@ fn linear_transform(
     buf: &[u32],
     width: u32,
     height: u32,
-    mat: [[f32; 2]; 2],
+    mat: [[f64; 2]; 2],
 ) -> (Vec<u32>, u32, u32) {
     let det = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0];
 
@@ -212,8 +212,8 @@ fn linear_transform(
     // 0, (H-1) -> -(H-1)/2, (H-1)/2
     // 0, (W-1) -> -(W-1)/2, (W-1)/2
     // half width half height is to center the image
-    let half_width = (width - 1) as f32 / 2.0;
-    let half_height = (height - 1) as f32 / 2.0;
+    let half_width = (width - 1) as f64 / 2.0;
+    let half_height = (height - 1) as f64 / 2.0;
 
     // 1 2
     // 3 4
@@ -232,8 +232,8 @@ fn linear_transform(
     let ymax = y1.max(y2).max(y3).max(y4);
     let ymin = y1.min(y2).min(y3).min(y4);
 
-    let new_width = (xmax - xmin + 1.0).clamp(0.0, WIDTH_LIMIT as f32) as u32;
-    let new_height = (ymax - ymin + 1.0).clamp(0.0, HEIGHT_LIMIT as f32) as u32;
+    let new_width = (xmax - xmin + 1.0).clamp(0.0, WIDTH_LIMIT as f64) as u32;
+    let new_height = (ymax - ymin + 1.0).clamp(0.0, HEIGHT_LIMIT as f64) as u32;
 
     let mut new_buf = vec![0u32; new_width as usize * new_height as usize];
 
@@ -244,12 +244,12 @@ fn linear_transform(
         ];
         [
             [
-                (inv[0][0] * 2f32.powi(32)) as i64,
-                (inv[0][1] * 2f32.powi(32)) as i64,
+                (inv[0][0] * 2f64.powi(32)) as i64,
+                (inv[0][1] * 2f64.powi(32)) as i64,
             ],
             [
-                (inv[1][0] * 2f32.powi(32)) as i64,
-                (inv[1][1] * 2f32.powi(32)) as i64,
+                (inv[1][0] * 2f64.powi(32)) as i64,
+                (inv[1][1] * 2f64.powi(32)) as i64,
             ],
         ]
     };
@@ -262,14 +262,14 @@ fn linear_transform(
 
     let base_src_x = xmin as i64 * inverse_mat[0][0]
         + ymax as i64 * inverse_mat[0][1]
-        + (half_width * 2f32.powi(32)) as i64;
+        + (half_width * 2f64.powi(32)) as i64;
 
     // NOTICE: y is inverted vertically
     // The Euclidean space assume y going **upwards**,
     // whereas our image has y going **downwards** so invert y is needed here
     // -- you'll notice that y consistently having the opposite sign to x in the code.
     let base_src_y = -xmin as i64 * inverse_mat[1][0] - ymax as i64 * inverse_mat[1][1]
-        + (half_height * 2f32.powi(32)) as i64;
+        + (half_height * 2f64.powi(32)) as i64;
 
     new_buf
         .par_chunks_exact_mut(new_width as usize)
@@ -306,8 +306,8 @@ fn linear_transform(
                 (0, new_width as i64)
             };
 
-            // `start` = index where both x and y are valid
-            // `end` = index where either x or y invalid
+            // `start` = first index where both x and y are valid
+            // `end` = first index where either x or y invalid after start
             let mut start = start_x.max(start_y).clamp(0, new_width as i64);
             let mut end = end_x.min(end_y).clamp(0, new_width as i64);
 
@@ -351,7 +351,7 @@ fn linear_transform(
 /// This is `a * b`.
 ///
 /// **Ordering** in matrix multiplication does **matter**.
-fn matrix_mul(a: [[f32; 2]; 2], b: [[f32; 2]; 2]) -> [[f32; 2]; 2] {
+fn matrix_mul(a: [[f64; 2]; 2], b: [[f64; 2]; 2]) -> [[f64; 2]; 2] {
     [
         [
             a[0][0] * b[0][0] + a[0][1] * b[1][0],
@@ -371,7 +371,7 @@ fn matrix_mul(a: [[f32; 2]; 2], b: [[f32; 2]; 2]) -> [[f32; 2]; 2] {
 /// ```
 /// let (new_width, new_height) = get_linear_transform_size(width, height, mat);
 /// ```
-fn get_linear_transform_size(width: u32, height: u32, mat: [[f32; 2]; 2]) -> (u32, u32) {
+fn get_linear_transform_size(width: u32, height: u32, mat: [[f64; 2]; 2]) -> (u32, u32) {
     // This is just a copy-paste from `linear_transform`
     // `linear_transform` won't call this because it also need xmax ymin..
 
@@ -379,8 +379,8 @@ fn get_linear_transform_size(width: u32, height: u32, mat: [[f32; 2]; 2]) -> (u3
     // 0, (H-1) -> -(H-1)/2, (H-1)/2
     // 0, (W-1) -> -(W-1)/2, (W-1)/2
     // half width half height is to center the image
-    let half_width = (width - 1) as f32 / 2.0;
-    let half_height = (height - 1) as f32 / 2.0;
+    let half_width = (width - 1) as f64 / 2.0;
+    let half_height = (height - 1) as f64 / 2.0;
 
     // 1 2
     // 3 4
@@ -399,8 +399,8 @@ fn get_linear_transform_size(width: u32, height: u32, mat: [[f32; 2]; 2]) -> (u3
     let ymax = y1.max(y2).max(y3).max(y4);
     let ymin = y1.min(y2).min(y3).min(y4);
 
-    let new_width = (xmax - xmin + 1.0).clamp(0.0, WIDTH_LIMIT as f32) as u32;
-    let new_height = (ymax - ymin + 1.0).clamp(0.0, HEIGHT_LIMIT as f32) as u32;
+    let new_width = (xmax - xmin + 1.0).clamp(0.0, WIDTH_LIMIT as f64) as u32;
+    let new_height = (ymax - ymin + 1.0).clamp(0.0, HEIGHT_LIMIT as f64) as u32;
 
     return (new_width, new_height);
 }
