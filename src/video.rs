@@ -43,6 +43,9 @@ pub struct Video {
     consumer: Receiver<frame::Video>,
 
     is_paused: bool,
+
+    /// angle of rotation in radians
+    rotation: f32,
 }
 
 impl Video {
@@ -62,6 +65,7 @@ impl Video {
             prev_time: None,
             consumer,
             is_paused: false,
+            rotation: 0.0,
         }
     }
 
@@ -86,13 +90,31 @@ impl Video {
                 }
             }
 
-            let (scaled_buf, scaled_width, scaled_height) =
-                scale_to_fit(window, &self.buf, self.width, self.height);
-            window.update_with_buffer(
-                &scaled_buf,
-                scaled_width as usize,
-                scaled_height as usize,
-            )?;
+            let rotation_mat = [
+                [f32::cos(self.rotation), -f32::sin(self.rotation)],
+                [f32::sin(self.rotation), f32::cos(self.rotation)],
+            ];
+
+            // scalar have to scale the video **after rotated** thus we need rotated width and height
+            let (rotated_width, rotated_height) =
+                get_linear_transform_size(self.width, self.height, rotation_mat);
+
+            // scale dynamically to fit the current window
+            let scalar = {
+                let (target_width, target_height) = window.get_size();
+                let width_ratio = target_width.clamp(0, WIDTH_LIMIT) as f32 / rotated_width as f32;
+                let height_ratio =
+                    target_height.clamp(0, HEIGHT_LIMIT) as f32 / rotated_height as f32;
+                f32::min(width_ratio, height_ratio)
+            };
+
+            // merge matrix together
+            // we're running rotation first then scale as planned
+            let mut mat = [[scalar, 0.0], [0.0, scalar]];
+            mat = matrix_mul(mat, rotation_mat);
+
+            let (buf, width, height) = linear_transform(&self.buf, self.width, self.height, mat);
+            window.update_with_buffer(&buf, width as usize, height as usize)?;
 
             if window.is_open() {
                 Ok(true)
@@ -137,6 +159,10 @@ impl Video {
     pub fn is_paused(&self) -> bool {
         self.is_paused
     }
+
+    pub fn set_rotation_angle(&mut self, radians: f32) {
+        self.rotation = radians;
+    }
 }
 
 /// Assume frame is 0RGB.
@@ -153,6 +179,9 @@ fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
             .iter_mut()
             .zip(src_row.as_chunks::<4>().0.iter().copied())
         {
+            // our ffmpeg decoder already chooses
+            // 0rgb or bgr0 format based on, native endian at runtime
+            // we should uses native endian here
             *dst = u32::from_ne_bytes(src);
         }
     }
@@ -160,47 +189,214 @@ fn video_frame_to_vec(video: &ffmpeg::frame::Video) -> Vec<u32> {
     return buf;
 }
 
-/// Scale dynamically to fit the window.
+/// Apply the linear transform.
 ///
 /// ## Example:
 /// ```rust
-/// let (scaled_buf, new_width, new_height) = scale_to_fit(window, &buf, width, height);
+/// let (new_buf, new_width, new_height) = linear_transform(&buf, width, height, transformation_matrix);
 /// ```
-fn scale_to_fit(window: &Window, buf: &[u32], width: u32, height: u32) -> (Vec<u32>, u32, u32) {
-    assert!(width <= WIDTH_LIMIT as u32);
-    assert!(height <= HEIGHT_LIMIT as u32);
+fn linear_transform(
+    buf: &[u32],
+    width: u32,
+    height: u32,
+    mat: [[f32; 2]; 2],
+) -> (Vec<u32>, u32, u32) {
+    let det = mat[0][0] * mat[1][1] - mat[0][1] * mat[1][0];
 
-    // Use stander 16x16 fixed-point number
-
-    let scalar = {
-        let (target_width, target_height) = window.get_size();
-        let width_ratio = target_width.clamp(0, WIDTH_LIMIT) as f64 / width as f64;
-        let height_ratio = target_height.clamp(0, HEIGHT_LIMIT) as f64 / height as f64;
-        (f64::min(width_ratio, height_ratio) * 2f64.powi(16)) as u32
-    };
-
-    let new_width = (width * scalar) >> 16;
-    let new_height = (height * scalar) >> 16;
-
-    if new_width == 0 || new_height == 0 {
+    if det == 0.0 {
         return (Vec::new(), 0, 0);
     }
 
-    let mut scaled_buf = vec![0u32; new_width as usize * new_height as usize];
-    let step = (2f64.powi(32) / scalar as f64) as u32;
+    // calculate new size, through the 4 corners
+    // 0, (H-1) -> -(H-1)/2, (H-1)/2
+    // 0, (W-1) -> -(W-1)/2, (W-1)/2
+    // half width half height is to center the image
+    let half_width = (width - 1) as f32 / 2.0;
+    let half_height = (height - 1) as f32 / 2.0;
 
-    let mut i = 0u32;
-    for dst_row in scaled_buf.chunks_exact_mut(new_width as usize) {
-        let src_row = &buf[(i >> 16) as usize * width as usize..];
+    // 1 2
+    // 3 4
+    let x1 = -half_width * mat[0][0] + half_height * mat[0][1];
+    let x2 = half_width * mat[0][0] + half_height * mat[0][1];
+    let x3 = -half_width * mat[0][0] - half_height * mat[0][1];
+    let x4 = half_width * mat[0][0] - half_height * mat[0][1];
 
-        let mut j = 0u32;
-        for pixel in dst_row.iter_mut() {
-            *pixel = src_row[(j >> 16) as usize];
-            j += step;
+    let y1 = -half_width * mat[1][0] + half_height * mat[1][1];
+    let y2 = half_width * mat[1][0] + half_height * mat[1][1];
+    let y3 = -half_width * mat[1][0] - half_height * mat[1][1];
+    let y4 = half_width * mat[1][0] - half_height * mat[1][1];
+
+    let xmax = x1.max(x2).max(x3).max(x4);
+    let xmin = x1.min(x2).min(x3).min(x4);
+    let ymax = y1.max(y2).max(y3).max(y4);
+    let ymin = y1.min(y2).min(y3).min(y4);
+
+    let new_width = (xmax - xmin + 1.0).clamp(0.0, WIDTH_LIMIT as f32) as u32;
+    let new_height = (ymax - ymin + 1.0).clamp(0.0, HEIGHT_LIMIT as f32) as u32;
+
+    let mut new_buf = vec![0u32; new_width as usize * new_height as usize];
+
+    let inverse_mat = {
+        let inv = [
+            [mat[1][1] / det, -mat[0][1] / det],
+            [-mat[1][0] / det, mat[0][0] / det],
+        ];
+        [
+            [
+                (inv[0][0] * 2f32.powi(32)) as i64,
+                (inv[0][1] * 2f32.powi(32)) as i64,
+            ],
+            [
+                (inv[1][0] * 2f32.powi(32)) as i64,
+                (inv[1][1] * 2f32.powi(32)) as i64,
+            ],
+        ]
+    };
+
+    // We're using inverse mapping and incremental stepping here
+    // Fixed-point numbers are 32x32 -- don't over complicate it, it's just an i64 multiply by 2^32
+
+    // Starting from our top-left corner
+    // This is simply inverse_mat * [xmin, ymax]
+
+    let mut src_x = (xmin as i64) * inverse_mat[0][0]
+        + (ymax as i64) * inverse_mat[0][1]
+        + (half_width * 2f32.powi(32)) as i64;
+
+    // NOTICE: y is inverted vertically
+    // The Euclidean space assume y going **upwards**,
+    // whereas our image has y going **downwards** so invert y is needed here
+    // -- you'll notice that y consistently having the opposite sign to x in the code.
+    let mut src_y = -(xmin as i64) * inverse_mat[1][0] - (ymax as i64) * inverse_mat[1][1]
+        + (half_height * 2f32.powi(32)) as i64;
+
+    for dst_line in new_buf.chunks_exact_mut(new_width as usize) {
+        // This is just a result from solving equations from the brute-force loop
+        let (start_x, end_x) = if inverse_mat[0][0] > 0 {
+            (
+                -src_x / inverse_mat[0][0],
+                (((width as i64) << 32) - src_x) / inverse_mat[0][0],
+            )
+        } else if inverse_mat[0][0] < 0 {
+            (
+                (((width as i64) << 32) - src_x) / inverse_mat[0][0],
+                -src_x / inverse_mat[0][0],
+            )
+        } else {
+            (0, new_width as i64)
+        };
+        let (start_y, end_y) = if inverse_mat[1][0] > 0 {
+            (
+                (src_y - ((height as i64) << 32)) / inverse_mat[1][0],
+                src_y / inverse_mat[1][0],
+            )
+        } else if inverse_mat[1][0] < 0 {
+            (
+                src_y / inverse_mat[1][0],
+                (src_y - ((height as i64) << 32)) / inverse_mat[1][0],
+            )
+        } else {
+            (0, new_width as i64)
+        };
+
+        // `start` = index where both x and y are valid
+        // `end` = index where either x or y invalid
+        let mut start = start_x.max(start_y).clamp(0, new_width as i64);
+        let mut end = end_x.min(end_y).clamp(0, new_width as i64);
+
+        // `start` and `end` might be off by 1
+        // calculations like `src_y / inverse_mat[1][0]`,
+        // do a `floor` on `start` -- `start` supposed to be `ceil` instead
+        // So we should run the brute-force loop
+        // this would strongly ensure that `start` and `end` are valid
+        while start < end {
+            let x = start * inverse_mat[0][0] + src_x;
+            let y = src_y - start * inverse_mat[1][0];
+            if x >= 0 && x < ((width as i64) << 32) && y >= 0 && y < ((height as i64) << 32) {
+                break;
+            }
+            start += 1;
+        }
+        while start < end {
+            let x = (end - 1) * inverse_mat[0][0] + src_x;
+            let y = src_y - (end - 1) * inverse_mat[1][0];
+            if x >= 0 && x < ((width as i64) << 32) && y >= 0 && y < ((height as i64) << 32) {
+                break;
+            }
+            end -= 1;
         }
 
-        i += step;
+        if start < end {
+            let mut x = start * inverse_mat[0][0] + src_x;
+            let mut y = src_y - start * inverse_mat[1][0];
+
+            for dst in &mut dst_line[start as usize..end as usize] {
+                *dst = buf[(y >> 32) as usize * width as usize + (x >> 32) as usize];
+                x += inverse_mat[0][0];
+                y -= inverse_mat[1][0];
+            }
+        }
+
+        src_x -= inverse_mat[0][1];
+        src_y += inverse_mat[1][1];
     }
 
-    return (scaled_buf, new_width, new_height);
+    return (new_buf, new_width, new_height);
+}
+
+/// This is `a * b`.
+///
+/// **Ordering** in matrix multiplication does **matter**.
+fn matrix_mul(a: [[f32; 2]; 2], b: [[f32; 2]; 2]) -> [[f32; 2]; 2] {
+    [
+        [
+            a[0][0] * b[0][0] + a[0][1] * b[1][0],
+            a[0][0] * b[0][1] + a[0][1] * b[1][1],
+        ],
+        [
+            a[1][0] * b[0][0] + a[1][1] * b[1][0],
+            a[1][0] * b[0][1] + a[1][1] * b[1][1],
+        ],
+    ]
+}
+
+/// Calculate the new size after linear transform without running the linear transform.
+/// This meant to help with planning up the final transform matrix to use.
+///
+/// ## Example
+/// ```
+/// let (new_width, new_height) = get_linear_transform_size(width, height, mat);
+/// ```
+fn get_linear_transform_size(width: u32, height: u32, mat: [[f32; 2]; 2]) -> (u32, u32) {
+    // This is just a copy-paste from `linear_transform`
+    // `linear_transform` won't call this because it also need xmax ymin..
+
+    // calculate new size, through the 4 corners
+    // 0, (H-1) -> -(H-1)/2, (H-1)/2
+    // 0, (W-1) -> -(W-1)/2, (W-1)/2
+    // half width half height is to center the image
+    let half_width = (width - 1) as f32 / 2.0;
+    let half_height = (height - 1) as f32 / 2.0;
+
+    // 1 2
+    // 3 4
+    let x1 = -half_width * mat[0][0] + half_height * mat[0][1];
+    let x2 = half_width * mat[0][0] + half_height * mat[0][1];
+    let x3 = -half_width * mat[0][0] - half_height * mat[0][1];
+    let x4 = half_width * mat[0][0] - half_height * mat[0][1];
+
+    let y1 = -half_width * mat[1][0] + half_height * mat[1][1];
+    let y2 = half_width * mat[1][0] + half_height * mat[1][1];
+    let y3 = -half_width * mat[1][0] - half_height * mat[1][1];
+    let y4 = half_width * mat[1][0] - half_height * mat[1][1];
+
+    let xmax = x1.max(x2).max(x3).max(x4);
+    let xmin = x1.min(x2).min(x3).min(x4);
+    let ymax = y1.max(y2).max(y3).max(y4);
+    let ymin = y1.min(y2).min(y3).min(y4);
+
+    let new_width = (xmax - xmin + 1.0).clamp(0.0, WIDTH_LIMIT as f32) as u32;
+    let new_height = (ymax - ymin + 1.0).clamp(0.0, HEIGHT_LIMIT as f32) as u32;
+
+    return (new_width, new_height);
 }
