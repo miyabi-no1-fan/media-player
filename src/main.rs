@@ -45,12 +45,14 @@ fn help() {
     println!("--help | -h          Print the this help description.");
     println!("--repeat | -r [n]    Repeat n times. Repeat forever if n is 0.");
     println!("--no-window          Don't open a window.");
+    println!("--rotate [deg]       rotate the input video by deg degree");
 }
 
 fn main() {
     let mut path: Option<String> = None;
     let mut repeat = 1;
     let mut no_window = false;
+    let mut rotate_deg = 0f32;
 
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -82,6 +84,17 @@ fn main() {
                 }
             }
             "--no-window" => no_window = true,
+            "--rotate" => {
+                let Some(v) = args.next() else {
+                    eprintln!("Invalid argument. Expect a value after {arg} flag");
+                    std::process::exit(1);
+                };
+                let Ok(num) = v.parse::<f32>() else {
+                    eprintln!("Invalid argument. Expect a value after {arg} flag");
+                    std::process::exit(1);
+                };
+                rotate_deg = num;
+            }
             _ if path.is_none() => path = Some(arg),
             _ => {
                 eprintln!("Invalid argument. Unknown argument");
@@ -102,7 +115,13 @@ fn main() {
 
     let mut i: isize = 0;
     while (i as usize) < repeat {
-        match run(path.clone(), &mut window, no_window, skip.unwrap_or(0)) {
+        match run(
+            path.clone(),
+            &mut window,
+            no_window,
+            skip.unwrap_or(0),
+            rotate_deg,
+        ) {
             Ok(()) => {}
             Err(err) => match err {
                 Error::Exit => break,
@@ -121,7 +140,13 @@ fn main() {
     }
 }
 
-fn run(path: String, window: &mut Option<Window>, no_window: bool, skip: i64) -> Result<(), Error> {
+fn run(
+    path: String,
+    window: &mut Option<Window>,
+    no_window: bool,
+    skip: i64,
+    rotate_deg: f32,
+) -> Result<(), Error> {
     let (decoder, fps, width, height) = Decoder::new(&path, skip)?;
 
     let duration = decoder.duration();
@@ -183,6 +208,7 @@ fn run(path: String, window: &mut Option<Window>, no_window: bool, skip: i64) ->
     }
 
     let mut video = Video::new(width, height, fps, video_cons.clone());
+    video.set_rotation_angle(rotate_deg.to_radians());
 
     let mut current_frame = skip as usize * fps;
 
