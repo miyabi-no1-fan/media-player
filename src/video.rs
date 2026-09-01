@@ -6,6 +6,7 @@ use std::{
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use ffmpeg::frame;
 use minifb::{Window, WindowOptions};
+use rayon::prelude::*;
 
 use crate::{Error, FPS_LIMIT, HEIGHT_LIMIT, WIDTH_LIMIT};
 
@@ -259,87 +260,90 @@ fn linear_transform(
     // Starting from our top-left corner
     // This is simply inverse_mat * [xmin, ymax]
 
-    let mut src_x = (xmin as i64) * inverse_mat[0][0]
-        + (ymax as i64) * inverse_mat[0][1]
+    let base_src_x = xmin as i64 * inverse_mat[0][0]
+        + ymax as i64 * inverse_mat[0][1]
         + (half_width * 2f32.powi(32)) as i64;
 
     // NOTICE: y is inverted vertically
     // The Euclidean space assume y going **upwards**,
     // whereas our image has y going **downwards** so invert y is needed here
     // -- you'll notice that y consistently having the opposite sign to x in the code.
-    let mut src_y = -(xmin as i64) * inverse_mat[1][0] - (ymax as i64) * inverse_mat[1][1]
+    let base_src_y = -xmin as i64 * inverse_mat[1][0] - ymax as i64 * inverse_mat[1][1]
         + (half_height * 2f32.powi(32)) as i64;
 
-    for dst_line in new_buf.chunks_exact_mut(new_width as usize) {
-        // This is just a result from solving equations from the brute-force loop
-        let (start_x, end_x) = if inverse_mat[0][0] > 0 {
-            (
-                -src_x / inverse_mat[0][0],
-                (((width as i64) << 32) - src_x) / inverse_mat[0][0],
-            )
-        } else if inverse_mat[0][0] < 0 {
-            (
-                (((width as i64) << 32) - src_x) / inverse_mat[0][0],
-                -src_x / inverse_mat[0][0],
-            )
-        } else {
-            (0, new_width as i64)
-        };
-        let (start_y, end_y) = if inverse_mat[1][0] > 0 {
-            (
-                (src_y - ((height as i64) << 32)) / inverse_mat[1][0],
-                src_y / inverse_mat[1][0],
-            )
-        } else if inverse_mat[1][0] < 0 {
-            (
-                src_y / inverse_mat[1][0],
-                (src_y - ((height as i64) << 32)) / inverse_mat[1][0],
-            )
-        } else {
-            (0, new_width as i64)
-        };
+    new_buf
+        .par_chunks_exact_mut(new_width as usize)
+        .enumerate()
+        .for_each(|(line, dst_line)| {
+            let src_x = base_src_x - line as i64 * inverse_mat[0][1];
+            let src_y = base_src_y + line as i64 * inverse_mat[1][1];
 
-        // `start` = index where both x and y are valid
-        // `end` = index where either x or y invalid
-        let mut start = start_x.max(start_y).clamp(0, new_width as i64);
-        let mut end = end_x.min(end_y).clamp(0, new_width as i64);
+            // This is just a result from solving equations from the brute-force loop
+            let (start_x, end_x) = if inverse_mat[0][0] > 0 {
+                (
+                    -src_x / inverse_mat[0][0],
+                    (((width as i64) << 32) - src_x) / inverse_mat[0][0],
+                )
+            } else if inverse_mat[0][0] < 0 {
+                (
+                    (((width as i64) << 32) - src_x) / inverse_mat[0][0],
+                    -src_x / inverse_mat[0][0],
+                )
+            } else {
+                (0, new_width as i64)
+            };
+            let (start_y, end_y) = if inverse_mat[1][0] > 0 {
+                (
+                    (src_y - ((height as i64) << 32)) / inverse_mat[1][0],
+                    src_y / inverse_mat[1][0],
+                )
+            } else if inverse_mat[1][0] < 0 {
+                (
+                    src_y / inverse_mat[1][0],
+                    (src_y - ((height as i64) << 32)) / inverse_mat[1][0],
+                )
+            } else {
+                (0, new_width as i64)
+            };
 
-        // `start` and `end` might be off by 1
-        // calculations like `src_y / inverse_mat[1][0]`,
-        // do a `floor` on `start` -- `start` supposed to be `ceil` instead
-        // So we should run the brute-force loop
-        // this would strongly ensure that `start` and `end` are valid
-        while start < end {
-            let x = start * inverse_mat[0][0] + src_x;
-            let y = src_y - start * inverse_mat[1][0];
-            if x >= 0 && x < ((width as i64) << 32) && y >= 0 && y < ((height as i64) << 32) {
-                break;
+            // `start` = index where both x and y are valid
+            // `end` = index where either x or y invalid
+            let mut start = start_x.max(start_y).clamp(0, new_width as i64);
+            let mut end = end_x.min(end_y).clamp(0, new_width as i64);
+
+            // `start` and `end` might be off by 1
+            // calculations like `src_y / inverse_mat[1][0]`,
+            // do a `floor` on `start` -- `start` supposed to be `ceil` instead
+            // So we should run the brute-force loop
+            // this would strongly ensure that `start` and `end` are valid
+            while start < end {
+                let x = start * inverse_mat[0][0] + src_x;
+                let y = src_y - start * inverse_mat[1][0];
+                if x >= 0 && x < ((width as i64) << 32) && y >= 0 && y < ((height as i64) << 32) {
+                    break;
+                }
+                start += 1;
             }
-            start += 1;
-        }
-        while start < end {
-            let x = (end - 1) * inverse_mat[0][0] + src_x;
-            let y = src_y - (end - 1) * inverse_mat[1][0];
-            if x >= 0 && x < ((width as i64) << 32) && y >= 0 && y < ((height as i64) << 32) {
-                break;
+            while start < end {
+                let x = (end - 1) * inverse_mat[0][0] + src_x;
+                let y = src_y - (end - 1) * inverse_mat[1][0];
+                if x >= 0 && x < ((width as i64) << 32) && y >= 0 && y < ((height as i64) << 32) {
+                    break;
+                }
+                end -= 1;
             }
-            end -= 1;
-        }
 
-        if start < end {
-            let mut x = start * inverse_mat[0][0] + src_x;
-            let mut y = src_y - start * inverse_mat[1][0];
+            if start < end {
+                let mut x = start * inverse_mat[0][0] + src_x;
+                let mut y = src_y - start * inverse_mat[1][0];
 
-            for dst in &mut dst_line[start as usize..end as usize] {
-                *dst = buf[(y >> 32) as usize * width as usize + (x >> 32) as usize];
-                x += inverse_mat[0][0];
-                y -= inverse_mat[1][0];
+                for dst in &mut dst_line[start as usize..end as usize] {
+                    *dst = buf[(y >> 32) as usize * width as usize + (x >> 32) as usize];
+                    x += inverse_mat[0][0];
+                    y -= inverse_mat[1][0];
+                }
             }
-        }
-
-        src_x -= inverse_mat[0][1];
-        src_y += inverse_mat[1][1];
-    }
+        });
 
     return (new_buf, new_width, new_height);
 }
