@@ -1,3 +1,8 @@
+// media-player TODOs:
+// move window to main
+// move decoder to main
+// use channel to communicate between threads
+
 extern crate ffmpeg_next as ffmpeg;
 
 use std::{io::Write, thread, time::Duration};
@@ -10,6 +15,19 @@ use crate::{decode::Decoder, video::Video};
 mod audio; // cpal
 mod decode; // ffmpeg
 mod video; // minifb
+
+const USAGE: &'static str = "
+Usage: media-player [options] <file>
+       media-player --help
+
+Play video and audio of a media file.
+
+Options:
+    --help, -h              Show this message.
+    --repeat [n], -r [n]    Plays in repeat [n] times, repeat forever if [n] is 0.
+    --no-window             Don't open a window -- plays audio only.
+    --rotate [deg]          Rotate the input video by [deg] degree.
+";
 
 const WIDTH_LIMIT: usize = 15360;
 const HEIGHT_LIMIT: usize = 8640;
@@ -40,12 +58,7 @@ enum Error {
 }
 
 fn help() {
-    println!("media-player\nUsage: media-player [media file]");
-    println!("Options:");
-    println!("--help | -h          Print the this help description.");
-    println!("--repeat | -r [n]    Repeat n times. Repeat forever if n is 0.");
-    println!("--no-window          Don't open a window.");
-    println!("--rotate [deg]       rotate the input video by deg degree");
+    print!("{USAGE}");
 }
 
 fn main() {
@@ -240,7 +253,7 @@ fn run(
                             decode::Status::Finish
                         ) {
                             // do nothing if decoder has finish
-                            // with low `DECODE_QUEUE_LEN`
+                            // with low `DECODE_PACKET_QUEUE_LEN`
                             // this should be the simpliest solution that works
                             continue;
                         }
@@ -309,8 +322,8 @@ fn run(
         let current_sec = current_frame / fps;
 
         if current_frame % fps == 0 {
-            print!("\x1B[1F\x1B[2K\r");
-            println!("{current_sec} / {duration} sec");
+            print!("\x1B[2K\r");
+            print!("{current_sec} / {duration} sec");
             std::io::stdout().flush().unwrap();
         }
 
