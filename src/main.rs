@@ -240,11 +240,13 @@ fn run(
                             *task = match *task {
                                 audio::Task::Play => audio::Task::Pause,
                                 audio::Task::Pause => audio::Task::Play,
-                                audio::Task::Flush | audio::Task::FlushOk => {
-                                    panic!("Not supposed to be here")
-                                }
+                                _ => panic!("State Error"),
                             };
                         }
+
+                        break; // <- this is needed
+                        // we should only handle 1 key at a time,
+                        // otherwise we might get some state error or worse freezing
                     }
 
                     Key::Right | Key::Left => {
@@ -307,6 +309,8 @@ fn run(
                             }
                             *ctrl.task.lock().unwrap() = prev_audio_task.unwrap();
                         }
+
+                        break;
                     }
 
                     Key::R => {
