@@ -5,7 +5,6 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use crossbeam_channel::SendTimeoutError;
 use crossbeam_channel::Sender;
 use ffmpeg::ChannelLayout;
 use ffmpeg::codec;
@@ -223,19 +222,37 @@ impl Decoder {
                                     (1, 1),
                                     ffmpeg::rescale::TIME_BASE,
                                 );
-                                decoder.ictx.seek(position, ..position)?;
+                                decoder.ictx.seek(position, position..position)?;
 
                                 *video_decode_task.lock().unwrap() = Some(Task::Flush);
                                 *audio_decode_task.lock().unwrap() = Some(Task::Flush);
+
+                                *task = Task::Play;
+                                drop(task);
+
+                                loop {
+                                    if let Ok(task) = video_decode_task.try_lock() {
+                                        if matches!(*task, None) {
+                                            break;
+                                        }
+                                    }
+                                    thread::sleep(Duration::from_micros(10));
+                                }
+
+                                loop {
+                                    if let Ok(task) = audio_decode_task.try_lock() {
+                                        if matches!(*task, None) {
+                                            break;
+                                        }
+                                    }
+                                    thread::sleep(Duration::from_micros(10));
+                                }
 
                                 while (is_video && !video_packet_prod.as_ref().unwrap().is_empty())
                                     || (is_audio && !audio_packet_prod.as_ref().unwrap().is_empty())
                                 {
                                     thread::sleep(Duration::from_micros(10));
                                 }
-
-                                *task = Task::Play;
-                                drop(task);
                             }
                             _ => panic!("Unknown decode task"),
                         }
@@ -321,16 +338,26 @@ impl Decoder {
                     while decoder.receive_frame(&mut decoded).is_ok() {
                         let mut frame = frame::Video::empty();
                         scaler.run(&decoded, &mut frame)?;
+                        if video_prod.send(frame).is_err() {
+                            break;
+                        }
 
-                        loop {
-                            if (*task.lock().unwrap()).is_some() {
+                        let mut task = task.lock().unwrap();
+                        match *task {
+                            Some(Task::Flush) => {
+                                decoder.flush();
+                                while !packet_cons.is_empty() {
+                                    let _ = packet_cons.try_recv();
+                                }
+                                *task = None;
+                                drop(task);
+                                while !video_prod.is_empty() {
+                                    thread::sleep(Duration::from_micros(10));
+                                }
                                 break;
                             }
-                            match video_prod.send_timeout(frame, Duration::from_micros(10)) {
-                                Ok(()) => break,
-                                Err(SendTimeoutError::Timeout(f)) => frame = f,
-                                _ => return Ok(()),
-                            }
+                            Some(_) => panic!("Unknown video decode task"),
+                            None => {}
                         }
                     }
                     Ok(())
@@ -339,25 +366,6 @@ impl Decoder {
             while let Ok(packet) = packet_cons.recv() {
                 decoder.send_packet(&packet)?;
                 receive_and_process_decoded_frames(&mut decoder, &mut scaler)?;
-
-                let mut task = task.lock().unwrap();
-                if let Some(t) = *task {
-                    match t {
-                        Task::Flush => {
-                            decoder.flush();
-
-                            while !packet_cons.is_empty() {
-                                let _ = packet_cons.try_recv();
-                            }
-
-                            while !video_prod.is_empty() {
-                                thread::sleep(Duration::from_micros(10));
-                            }
-                        }
-                        _ => panic!("Unknown video decode task"),
-                    }
-                    *task = None;
-                }
             }
 
             decoder.send_eof()?;
@@ -392,16 +400,27 @@ impl Decoder {
                     while decoder.receive_frame(&mut decoded).is_ok() {
                         let mut frame = frame::Audio::empty();
                         resampler.run(&decoded, &mut frame)?;
+                        if audio_prod.send(frame).is_err() {
+                            break;
+                        }
 
-                        loop {
-                            if (*task.lock().unwrap()).is_some() {
+                        let mut task = task.lock().unwrap();
+                        match *task {
+                            Some(Task::Flush) => {
+                                decoder.flush();
+                                Self::audio_flush(resampler, None)?;
+                                while !packet_cons.is_empty() {
+                                    let _ = packet_cons.try_recv();
+                                }
+                                *task = None;
+                                drop(task);
+                                while !audio_prod.is_empty() {
+                                    thread::sleep(Duration::from_micros(10));
+                                }
                                 break;
                             }
-                            match audio_prod.send_timeout(frame, Duration::from_micros(10)) {
-                                Ok(()) => break,
-                                Err(SendTimeoutError::Timeout(f)) => frame = f,
-                                _ => return Ok(()),
-                            }
+                            Some(_) => panic!("Unknown audio decode task"),
+                            None => {}
                         }
                     }
                     Ok(())
@@ -410,26 +429,6 @@ impl Decoder {
             while let Ok(packet) = packet_cons.recv() {
                 decoder.send_packet(&packet)?;
                 receive_and_process_decoded_frames(&mut decoder, &mut resampler)?;
-
-                let mut task = task.lock().unwrap();
-                if let Some(t) = *task {
-                    match t {
-                        Task::Flush => {
-                            decoder.flush();
-                            Self::audio_flush(&mut resampler, None)?;
-
-                            while !packet_cons.is_empty() {
-                                let _ = packet_cons.try_recv();
-                            }
-
-                            while !audio_prod.is_empty() {
-                                thread::sleep(Duration::from_micros(10));
-                            }
-                        }
-                        _ => panic!("Unknown video decode task"),
-                    }
-                    *task = None;
-                }
             }
 
             decoder.send_eof()?;
