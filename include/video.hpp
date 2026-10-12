@@ -14,7 +14,7 @@
 class Video {
     std::size_t width;
     std::size_t height;
-    std::size_t bpp = 4;
+    std::size_t bpp = 3;
     double fps;
 
     aglea::App window;

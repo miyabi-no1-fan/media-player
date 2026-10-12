@@ -54,7 +54,7 @@ class Decoder {
             // clang-format off
             sws = sws_getContext(
                 decoder->width, decoder->height, decoder->pix_fmt,
-                decoder->width, decoder->height, AV_PIX_FMT_RGBA,
+                decoder->width, decoder->height, AV_PIX_FMT_RGB24, // YUV format is cursed, do not use
                 SWS_BILINEAR, nullptr, nullptr, nullptr);
             // clang-format on
         }

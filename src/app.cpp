@@ -52,7 +52,7 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
             image_buffer[i] = std::make_unique<Image>(
                 ctx,
                 vk::ImageType::e2D,
-                vk::Format::eR8G8B8A8Unorm,
+                vk::Format::eR8G8B8Unorm,
                 vk::Extent3D(this->width, this->height, 1),
                 vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
                 vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -86,7 +86,7 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
 
     staged_image = std::make_unique<Buffer>(
         ctx,
-        4,
+        3,
         this->width * this->height,
         vk::BufferUsageFlagBits::eTransferSrc,
         vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -155,7 +155,7 @@ void App::render(const void* data) {
     window.poll_events();
     if (auto i = acquire_next_frame()) {
         update_global_ubo(*i);
-        std::memcpy(staged_image->get_mapped_memory(), data, width * height * 4);
+        std::memcpy(staged_image->get_mapped_memory(), data, width * height * 3);
         record_command_buffer(*i);
         submit_frame(*i);
     }
