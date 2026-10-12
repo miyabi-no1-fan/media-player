@@ -164,14 +164,13 @@ void App::render(const void* data) {
 void App::update_global_ubo(std::size_t i) {
     float w = static_cast<float>(width);
     float h = static_cast<float>(height);
-    auto extent = window.get_extent();
-    float width_ratio = static_cast<float>(extent.width) / w;
-    float height_ratio = static_cast<float>(extent.height) / h;
+    float width_ratio = static_cast<float>(swap_chain->width()) / w;
+    float height_ratio = static_cast<float>(swap_chain->height()) / h;
     auto* v = static_cast<GlobalUBO*>(global_ubo[i]->get_mapped_memory());
     if (width_ratio < height_ratio) {
-        v->scale = { 1, w * width_ratio / extent.height };
+        v->scale = { 1, h * width_ratio / swap_chain->height() };
     } else {
-        v->scale = { h * height_ratio / extent.width, 1 };
+        v->scale = { w * height_ratio / swap_chain->width(), 1 };
     }
 }
 
