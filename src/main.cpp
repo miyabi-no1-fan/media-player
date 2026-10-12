@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,7 @@
 
 #include "audio.hpp"
 #include "decoder.hpp"
+#include "matrix.hpp"
 #include "state.hpp"
 #include "video.hpp"
 
@@ -31,6 +33,7 @@ static constexpr char USAGE[] =
 struct Info {
     std::string path;
     int loop = 1;
+    aglea::mat2x2 transformation = aglea::mat2x2::identity();
 };
 
 Info parse(int argc, const char* argv[]);
@@ -64,7 +67,8 @@ int main(int argc, const char* argv[]) try {
                 static_cast<std::uint32_t>(*decoder.output_height()),
                 std::round(*decoder.fps()),
                 *decoder.duration_us(),
-                "vplayer: " + info.path);
+                "vplayer: " + info.path,
+                info.transformation);
         }
 
         if (audio) audio->play();
@@ -117,6 +121,22 @@ Info parse(int argc, const char* argv[]) {
                     throw std::invalid_argument("Unknown argument for --loop");
                 }
                 if (info.loop < 0) info.loop = std::numeric_limits<decltype(info.loop)>::max();
+            }
+
+            else if (arg.compare("--rotate") == 0) {
+                i++;
+                std::istringstream iss(argv[i]);
+                double deg;
+                iss >> deg;
+                if (!iss || !iss.eof()) {
+                    throw std::invalid_argument("Unknown argument for --rotate");
+                }
+                double rad = -deg * std::numbers::pi / 180.0;
+                aglea::mat2x2 rotation = {
+                    { std::cos(rad), -std::sin(rad) },
+                    { std::sin(rad), std::cos(rad) },
+                };
+                info.transformation = rotation * info.transformation;
             }
 
             else if (info.path.empty()) {
