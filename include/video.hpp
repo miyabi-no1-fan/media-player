@@ -38,6 +38,7 @@ class Video {
     }
 
     void play();
+    void clear_state();
 
    private:
     bool render();

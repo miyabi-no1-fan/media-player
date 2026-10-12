@@ -121,3 +121,8 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       duration_us(duration_us),
       window(width, height, 1.0 / fps, name),
       screen(size(), 0) {}
+
+void Video::clear_state() {
+    current_frame = 0;
+    screen.assign(size(), 0);
+}
