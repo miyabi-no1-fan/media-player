@@ -1,5 +1,6 @@
 #include "app.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -165,14 +166,46 @@ void App::render(const void* data, mat2x2 transformation) {
 void App::update_global_ubo(std::size_t i, mat2x2 A) {
     float w = static_cast<float>(width);
     float h = static_cast<float>(height);
-    float width_ratio = static_cast<float>(swap_chain->width()) / w;
-    float height_ratio = static_cast<float>(swap_chain->height()) / h;
+    float W = static_cast<float>(swap_chain->width());
+    float H = static_cast<float>(swap_chain->height());
+
+    float half_width = (w - 1) / 2;
+    float half_height = (h - 1) / 2;
+
+    // 1    2
+    // 3    4
+    const float x1 = -half_width * A[0][0] + half_height * A[0][1];
+    const float x2 = half_width * A[0][0] + half_height * A[0][1];
+    const float x3 = -half_width * A[0][0] - half_height * A[0][1];
+    const float x4 = half_width * A[0][0] - half_height * A[0][1];
+
+    const float y1 = -half_width * A[1][0] + half_height * A[1][1];
+    const float y2 = half_width * A[1][0] + half_height * A[1][1];
+    const float y3 = -half_width * A[1][0] - half_height * A[1][1];
+    const float y4 = half_width * A[1][0] - half_height * A[1][1];
+
+    const float xmax = std::max(std::max(std::max(x1, x2), x3), x4);
+    const float xmin = std::min(std::min(std::min(x1, x2), x3), x4);
+    const float ymax = std::max(std::max(std::max(y1, y2), y3), y4);
+    const float ymin = std::min(std::min(std::min(y1, y2), y3), y4);
+
+    const uint32_t box_width = (uint32_t)(xmax - xmin + 1);
+    const uint32_t box_height = (uint32_t)(ymax - ymin + 1);
+
+    float scale = std::min(W / box_width, H / box_height);
+
+    // [1, 1] -> [w/2, h/2]
+    mat2x2 unit = mat2x2::zeros();
+    unit[0][0] = w * 0.5f;
+    unit[1][1] = h * 0.5f;
+
+    // [W/2, H/2] -> [1, 1]
+    mat2x2 un_unit = mat2x2::zeros();
+    un_unit[0][0] = 2.0f / W;
+    un_unit[1][1] = 2.0f / H;
+
     auto* v = static_cast<GlobalUBO*>(global_ubo[i]->get_mapped_memory());
-    if (width_ratio < height_ratio) {
-        v->scale = { 1, h * width_ratio / swap_chain->height() };
-    } else {
-        v->scale = { w * height_ratio / swap_chain->width(), 1 };
-    }
+    v->transformation = scale * (un_unit * A * unit);
 }
 
 std::optional<std::uint32_t> App::acquire_next_frame() {
