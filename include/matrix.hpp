@@ -542,6 +542,9 @@ class vec {
         return *this;
     }
 
+    template <std::size_t N>
+    friend constexpr vec<T, N> operator*(const mat<T, N, M>& a, const vec& b) { return vec(a * b.data); }
+
     template <typename R = T>
     constexpr R length() const { return data.template length<R>(); }
 
