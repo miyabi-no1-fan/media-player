@@ -95,6 +95,9 @@ std::thread Decoder::launch() {
 
         if (video_thrd.joinable()) video_thrd.join();
         if (audio_thrd.joinable()) audio_thrd.join();
+
+        if (video) ::Frame::Video::sender.send_eof();
+        if (audio) ::Frame::Audio::sender.send_eof();
     });
 }
 
@@ -128,13 +131,10 @@ std::thread Decoder::launch_video_decoder() {
             int res = avcodec_send_packet(video->decoder, nullptr);
             if (res < 0) throw res;
             receive_franes();
-
-            ::Frame::Video::sender.send_eof();
         } catch (int err) {
             if (err < 0) {
                 video_decoder_status.store(err, std::memory_order::relaxed);
                 std::cerr << "Video decode error: " << err << "\n";
-                ::Frame::Video::sender.send_eof();
             }
             return;
         }
@@ -177,13 +177,10 @@ std::thread Decoder::launch_audio_decoder() {
                     ::Frame::Audio::sender.send(std::move(*res));
                 }
             }
-
-            ::Frame::Audio::sender.send_eof();
         } catch (int err) {
             if (err < 0) {
                 audio_decoder_status.store(err, std::memory_order::relaxed);
                 std::cerr << "Audio decode error: " << err << "\n";
-                ::Frame::Audio::sender.send_eof();
             }
             return;
         }
