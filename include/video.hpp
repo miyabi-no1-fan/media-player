@@ -5,8 +5,6 @@
 #include <vector>
 
 #include "app.hpp"
-#include "decoder.hpp"
-#include "ringbuf.hpp"
 
 class Video {
     std::size_t width;
@@ -18,12 +16,10 @@ class Video {
     std::int64_t current_frame = 0;
 
     aglea::App window;
-    RingBuf::Receiver<Decoder::Frame> receiver;
-
     std::vector<std::uint8_t> screen;
 
    public:
-    Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name, RingBuf::Receiver<Decoder::Frame> receiver);
+    Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name);
 
     Video(const Video&) = delete;
     Video& operator=(const Video&) = delete;

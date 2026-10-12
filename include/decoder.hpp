@@ -2,6 +2,7 @@
 #include <RtAudio.h>
 
 #include <cstdint>
+#include <expected>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -20,9 +21,6 @@ extern "C" {
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
-
-#include "ringbuf.hpp"
-#include "spsc.hpp"
 
 static const std::map<AVSampleFormat, RtAudioFormat> supported_audio_formats = {
     { AV_SAMPLE_FMT_FLT, RTAUDIO_FLOAT32 },
@@ -69,9 +67,13 @@ class Decoder {
             // if format is supported, then we don't need swr
             auto it = supported_audio_formats.find(decoder->sample_fmt);
             if (it != supported_audio_formats.end()) return;
-
+            // fallback to use swr if format is not supported
+            create_swr();
+        }
+        void create_swr() {
+            swr_free(&swr);
             // clang-format off
-            swr_alloc_set_opts2(&swr, // fallback to use swr if format is not supported
+            swr_alloc_set_opts2(&swr,
                 &decoder->ch_layout, supported_audio_formats.begin()->first, decoder->sample_rate,
                 &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
                 0, nullptr);
@@ -119,8 +121,7 @@ class Decoder {
         }
     };
 
-    std::thread launch(RingBuf::Sender<Frame> video_sender,
-                       RingBuf::Sender<Frame> audio_sender);
+    std::thread launch();
 
     ~Decoder() {
         avformat_close_input(&ictx);
@@ -230,6 +231,7 @@ class Decoder {
         return Stream(index, codec, decoder);
     }
 
+   public:
     struct Packet {
         AVPacket* packet = nullptr;
         Packet() { packet = nullptr; }
@@ -249,7 +251,8 @@ class Decoder {
         }
     };
 
-    std::thread launch_video_decoder(RingBuf::Sender<Frame> sender, SPSC::Receiver<Packet> receiver);
-    std::thread launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::Receiver<Packet> receiver);
+   private:
+    std::thread launch_video_decoder();
+    std::thread launch_audio_decoder();
     std::expected<Frame, int> resample_audio(const AVFrame* input);
 };

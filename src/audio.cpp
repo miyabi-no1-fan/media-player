@@ -11,18 +11,13 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <utility>
 #include <variant>
 #include <vector>
 
-#include "decoder.hpp"
-#include "ringbuf.hpp"
+#include "state.hpp"
 
 extern std::atomic_bool paused;
-
 extern std::atomic_bool seek_req;
-
-extern std::atomic_bool audio_decode_idle;
 std::atomic_bool audio_idle = false;
 
 template <typename T>
@@ -43,19 +38,10 @@ int Audio::callback(void* output_buffer, void* input_buffer, unsigned int nbuffe
         return 0;
     }
 
-    if (seek_req.load()) {
-        self.queue<T>().clear();
-        while (!audio_decode_idle.load()) auto _ = self.receiver.try_receive();
-        while (self.receiver.try_receive());
-        audio_idle.store(true);
-        while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
-        audio_idle.store(false);
-    }
-
     const std::chrono::duration<double> time_budget(static_cast<double>(needed) / static_cast<double>(self.sample_rate));
 
     while (self.queue<T>().size() < needed) {
-        auto res = self.receiver.receive_timeout(time_budget * 0.9);
+        auto res = Frame::Audio::receiver.receive_timeout(time_budget * 0.8);
         if (!res) break;
         auto* frame = res->frame;
         assert(frame);
@@ -66,6 +52,13 @@ int Audio::callback(void* output_buffer, void* input_buffer, unsigned int nbuffe
                           static_cast<std::size_t>(frame->ch_layout.nb_channels);
 
         self.queue<T>().append_range(std::span<T>(samples, len));
+
+        if (seek_req.load()) {
+            self.queue<T>().clear();
+            audio_idle.store(true);
+            while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
+            audio_idle.store(false);
+        }
     }
 
     const std::size_t n = std::min(self.queue<T>().size(), needed);
@@ -77,9 +70,8 @@ int Audio::callback(void* output_buffer, void* input_buffer, unsigned int nbuffe
     return 0;
 }
 
-Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format, RingBuf::Receiver<Decoder::Frame> receiver)
-    : receiver(std::move(receiver)),
-      channels(channels),
+Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format)
+    : channels(channels),
       sample_rate(sample_rate) {
     RtAudio::StreamParameters parameters;
     parameters.deviceId = dac.getDefaultOutputDevice();

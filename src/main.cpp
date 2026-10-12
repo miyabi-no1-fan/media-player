@@ -12,7 +12,7 @@
 
 #include "audio.hpp"
 #include "decoder.hpp"
-#include "ringbuf.hpp"
+#include "state.hpp"
 #include "video.hpp"
 
 static constexpr char USAGE[] =
@@ -33,12 +33,10 @@ Info parse(int argc, const char* argv[]);
 int main(int argc, const char* argv[]) try {
     Info info = parse(argc, argv);
 
+    init_channels();
+
     Decoder decoder(info.path.c_str());
-
-    auto [video_sender, video_receiver] = RingBuf::bounded_channel<Decoder::Frame>(4);
-    auto [audio_sender, audio_receiver] = RingBuf::bounded_channel<Decoder::Frame>(4);
-
-    auto decode_thrd = decoder.launch(std::move(video_sender), std::move(audio_sender));
+    auto decode_thrd = decoder.launch();
 
     std::unique_ptr<Audio> audio = nullptr;
     std::unique_ptr<Video> video = nullptr;
@@ -47,8 +45,7 @@ int main(int argc, const char* argv[]) try {
         audio = std::make_unique<Audio>(
             *decoder.output_channels(),
             *decoder.output_sample_rate(),
-            rt_audio_format(*decoder.output_sample_format()),
-            std::move(audio_receiver));
+            rt_audio_format(*decoder.output_sample_format()));
     }
 
     if (decoder.has_video()) {
@@ -57,8 +54,7 @@ int main(int argc, const char* argv[]) try {
             static_cast<std::uint32_t>(*decoder.output_height()),
             std::round(*decoder.fps()),
             *decoder.duration_us(),
-            "vplayer: " + info.path,
-            std::move(video_receiver));
+            "vplayer: " + info.path);
     }
 
     if (audio) audio->play();

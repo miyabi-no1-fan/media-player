@@ -25,6 +25,8 @@ class Receiver {
     std::size_t index = 0;
 
    public:
+    Receiver() {}
+
     Receiver(std::shared_ptr<std::vector<std::optional<T>>> buf,
              std::shared_ptr<std::atomic<std::size_t>> msg_count)
         : buf(std::move(buf)), msg_count(std::move(msg_count)) {}
@@ -79,6 +81,8 @@ class Sender {
     bool closed = false;
 
    public:
+    Sender() {}
+
     Sender(std::shared_ptr<std::vector<std::optional<T>>> buf,
            std::shared_ptr<std::atomic<std::size_t>> msg_count)
         : buf(std::move(buf)), msg_count(std::move(msg_count)) {}

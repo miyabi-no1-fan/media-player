@@ -21,8 +21,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
-#include "ringbuf.hpp"
-#include "spsc.hpp"
+#include "state.hpp"
 
 static constexpr int VIDEO_PACKET_CHANNEL_SOFT_LIMNIT = 4;
 static constexpr int AUDIO_PACKET_CHANNEL_SOFT_LIMNIT = 4;
@@ -35,39 +34,39 @@ std::atomic_bool seek_available = true;
 std::atomic_bool seek_req = false;
 std::atomic_int64_t seek_time_us = 0;
 
-std::atomic_bool video_decode_idle = false;
-std::atomic_bool audio_decode_idle = false;
 extern std::atomic_bool audio_idle;
 extern std::atomic_bool video_idle;
 
-std::thread Decoder::launch(RingBuf::Sender<Frame> video_sender,
-                            RingBuf::Sender<Frame> audio_sender) {
-    return std::thread([this, video_sender = std::move(video_sender), audio_sender = std::move(audio_sender)]() mutable {
-        auto [video_packet_sender, video_packet_receiver] = SPSC::unbounded_channel<Packet>();
-        auto [audio_packet_sender, audio_packet_receiver] = SPSC::unbounded_channel<Packet>();
-
+std::thread Decoder::launch() {
+    return std::thread([this]() mutable {
         std::thread video_thrd, audio_thrd;
-        if (video) video_thrd = launch_video_decoder(std::move(video_sender), std::move(video_packet_receiver));
-        if (audio) audio_thrd = launch_audio_decoder(std::move(audio_sender), std::move(audio_packet_receiver));
+        if (video) video_thrd = launch_video_decoder();
+        if (audio) audio_thrd = launch_audio_decoder();
 
         Packet p = av_packet_alloc();
         while ((video || audio) && av_read_frame(ictx, p.packet) >= 0) {
             if (video && p.packet->stream_index == video->stream_index)
-                video_packet_sender.send(std::move(p));
+                ::Packet::Video::sender.send(std::move(p));
             else if (audio && p.packet->stream_index == audio->stream_index)
-                audio_packet_sender.send(std::move(p));
+                ::Packet::Audio::sender.send(std::move(p));
             p = av_packet_alloc();
 
             while (video || audio) {
                 if (seek_req.load()) {
                     std::int64_t ts = seek_time_us.load();
                     avformat_seek_file(ictx, -1, ts - AV_TIME_BASE, ts, ts + AV_TIME_BASE, 0);
-                    while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
-                    while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+                    while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    while (::Frame::Video::receiver.try_receive());
+                    while (::Frame::Audio::receiver.try_receive());
+                    if (video_thrd.joinable()) video_thrd.join();
+                    if (audio_thrd.joinable()) audio_thrd.join();
                     if (video) avcodec_flush_buffers(video->decoder);
                     if (audio) avcodec_flush_buffers(audio->decoder);
-                    if (audio && audio->swr)
-                        while (resample_audio(nullptr));
+                    if (audio && audio->swr) audio->create_swr();
+                    init_channels();
+                    if (video) video_thrd = launch_video_decoder();
+                    if (audio) audio_thrd = launch_audio_decoder();
                     seek_req.store(false);
                 }
 
@@ -77,30 +76,30 @@ std::thread Decoder::launch(RingBuf::Sender<Frame> video_sender,
                     audio = std::nullopt;
 
                 unsigned long v = std::numeric_limits<unsigned long>::max();
-                if (video) v = video_packet_sender.len();
+                if (video) v = ::Packet::Video::sender.len();
                 unsigned long a = std::numeric_limits<unsigned long>::max();
-                if (audio) a = audio_packet_sender.len();
+                if (audio) a = ::Packet::Audio::sender.len();
                 if (v <= VIDEO_PACKET_CHANNEL_SOFT_LIMNIT ||
                     a <= AUDIO_PACKET_CHANNEL_SOFT_LIMNIT) {
                     break;
                 }
-                std::this_thread::sleep_for(std::chrono::microseconds(10));
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
             }
         }
 
         seek_available.store(false);
 
-        if (video) video_packet_sender.drop_connection();
-        if (audio) audio_packet_sender.drop_connection();
+        if (video) ::Packet::Video::sender.drop_connection();
+        if (audio) ::Packet::Audio::sender.drop_connection();
 
         if (video_thrd.joinable()) video_thrd.join();
         if (audio_thrd.joinable()) audio_thrd.join();
     });
 }
 
-std::thread Decoder::launch_video_decoder(RingBuf::Sender<Frame> sender, SPSC::Receiver<Decoder::Packet> receiver) {
+std::thread Decoder::launch_video_decoder() {
     assert(video);
-    return std::thread([this, sender = std::move(sender), receiver = std::move(receiver)]() mutable {
+    return std::thread([this]() mutable {
         try {
             Frame f = av_frame_alloc();
             auto receive_franes = [&]() {
@@ -110,43 +109,40 @@ std::thread Decoder::launch_video_decoder(RingBuf::Sender<Frame> sender, SPSC::R
                         int res = sws_scale_frame(video->sws, out.frame, f.frame);
                         if (res < 0) throw res;
                         av_frame_unref(f.frame);
-                        sender.send(std::move(out));
+                        ::Frame::Video::sender.send(std::move(out));
                     } else {
-                        sender.send(std::move(f));
+                        ::Frame::Video::sender.send(std::move(f));
                         f.frame = av_frame_alloc();
                     }
 
-                    if (seek_req.load()) {
-                        video_decode_idle.store(true);
-                        while (receiver.try_receive());
-                        while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
-                        video_decode_idle.store(false);
-                        break;
-                    }
+                    if (seek_req.load()) throw 0;
                 }
             };
 
-            while (auto rec = receiver.receive()) {
-                video_decode_idle.store(false);
+            while (auto rec = ::Packet::Video::receiver.receive()) {
                 if (avcodec_send_packet(video->decoder, rec->packet) >= 0)
                     receive_franes();
-                video_decode_idle.store(true);
             }
 
             int res = avcodec_send_packet(video->decoder, nullptr);
             if (res < 0) throw res;
             receive_franes();
+
+            ::Frame::Video::sender.send_eof();
         } catch (int err) {
-            video_decoder_status.store(err, std::memory_order::relaxed);
-            std::cerr << "Video decode error: " << err << "\n";
+            if (err < 0) {
+                video_decoder_status.store(err, std::memory_order::relaxed);
+                std::cerr << "Video decode error: " << err << "\n";
+                ::Frame::Video::sender.send_eof();
+            }
             return;
         }
     });
 }
 
-std::thread Decoder::launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::Receiver<Decoder::Packet> receiver) {
+std::thread Decoder::launch_audio_decoder() {
     assert(audio);
-    return std::thread([this, sender = std::move(sender), receiver = std::move(receiver)]() mutable {
+    return std::thread([this]() mutable {
         try {
             Frame f = av_frame_alloc();
             auto receive_franes = [&]() {
@@ -155,27 +151,19 @@ std::thread Decoder::launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::R
                         auto res = resample_audio(f.frame);
                         if (!res) throw res.error();
                         av_frame_unref(f.frame);
-                        sender.send(std::move(*res));
+                        ::Frame::Audio::sender.send(std::move(*res));
                     } else {
-                        sender.send(std::move(f));
+                        ::Frame::Audio::sender.send(std::move(f));
                         f = av_frame_alloc();
                     }
 
-                    if (seek_req.load()) {
-                        audio_decode_idle.store(true);
-                        while (receiver.try_receive());
-                        while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
-                        audio_decode_idle.store(false);
-                        break;
-                    }
+                    if (seek_req.load()) throw 0;
                 }
             };
 
-            while (auto rec = receiver.receive()) {
-                audio_decode_idle.store(false);
+            while (auto rec = ::Packet::Audio::receiver.receive()) {
                 if (avcodec_send_packet(audio->decoder, rec->packet) >= 0)
                     receive_franes();
-                audio_decode_idle.store(true);
             }
 
             int res = avcodec_send_packet(audio->decoder, nullptr);
@@ -185,12 +173,17 @@ std::thread Decoder::launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::R
             if (audio->swr) {
                 while (auto res = resample_audio(nullptr)) {
                     if (res->frame->nb_samples == 0) break;
-                    sender.send(std::move(*res));
+                    ::Frame::Audio::sender.send(std::move(*res));
                 }
             }
+
+            ::Frame::Audio::sender.send_eof();
         } catch (int err) {
-            audio_decoder_status.store(err, std::memory_order::relaxed);
-            std::cerr << "Audio decode error: " << err << "\n";
+            if (err < 0) {
+                audio_decoder_status.store(err, std::memory_order::relaxed);
+                std::cerr << "Audio decode error: " << err << "\n";
+                ::Frame::Audio::sender.send_eof();
+            }
             return;
         }
     });

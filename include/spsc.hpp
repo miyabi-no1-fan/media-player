@@ -68,6 +68,8 @@ class Receiver {
     std::shared_ptr<Counters> msg_count = nullptr;
 
    public:
+    Receiver() {}
+
     Receiver(std::shared_ptr<Container<T>> buf,
              std::shared_ptr<Counters> msg_count)
         : buf(std::move(buf)), msg_count(std::move(msg_count)) {}
@@ -124,6 +126,8 @@ class Sender {
     bool closed = false;
 
    public:
+    Sender() {}
+
     Sender(std::shared_ptr<Container<T>> buf,
            std::shared_ptr<Counters> msg_count)
         : buf(std::move(buf)), msg_count(std::move(msg_count)) {}

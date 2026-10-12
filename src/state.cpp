@@ -1,0 +1,47 @@
+#include "state.hpp"
+
+namespace Packet {
+namespace Video {
+SPSC::Sender<Decoder::Packet> sender;
+SPSC::Receiver<Decoder::Packet> receiver;
+}  // namespace Video
+namespace Audio {
+SPSC::Sender<Decoder::Packet> sender;
+SPSC::Receiver<Decoder::Packet> receiver;
+}  // namespace Audio
+}  // namespace Packet
+
+namespace Frame {
+namespace Video {
+RingBuf::Sender<Decoder::Frame> sender;
+RingBuf::Receiver<Decoder::Frame> receiver;
+}  // namespace Video
+namespace Audio {
+RingBuf::Sender<Decoder::Frame> sender;
+RingBuf::Receiver<Decoder::Frame> receiver;
+}  // namespace Audio
+}  // namespace Frame
+
+void init_channels() {
+    {
+        auto [s, r] = SPSC::unbounded_channel<Decoder::Packet>();
+        Packet::Video::sender = std::move(s);
+        Packet::Video::receiver = std::move(r);
+    }
+    {
+        auto [s, r] = SPSC::unbounded_channel<Decoder::Packet>();
+        Packet::Audio::sender = std::move(s);
+        Packet::Audio::receiver = std::move(r);
+    }
+
+    {
+        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(4);
+        Frame::Video::sender = std::move(s);
+        Frame::Video::receiver = std::move(r);
+    }
+    {
+        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(4);
+        Frame::Audio::sender = std::move(s);
+        Frame::Audio::receiver = std::move(r);
+    }
+}

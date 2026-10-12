@@ -5,12 +5,8 @@
 #include <variant>
 #include <vector>
 
-#include "decoder.hpp"
-#include "ringbuf.hpp"
-
 class Audio {
     RtAudio dac;
-    RingBuf::Receiver<Decoder::Frame> receiver;
     unsigned int channels;
     unsigned int sample_rate;
 
@@ -25,7 +21,7 @@ class Audio {
     std::vector<T>& queue() { return std::get<std::vector<T>>(queues); }
 
    public:
-    Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format, RingBuf::Receiver<Decoder::Frame> receiver);
+    Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format);
     void play();
     ~Audio();
 

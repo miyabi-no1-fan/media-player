@@ -9,19 +9,16 @@
 #include <cstdint>
 #include <cstring>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include "app.hpp"
 #include "ringbuf.hpp"
+#include "state.hpp"
 
 std::atomic_bool paused = false;
-
 extern std::atomic_bool seek_available;
 extern std::atomic_bool seek_req;
 extern std::atomic_int64_t seek_time_us;
-
-extern std::atomic_bool video_decode_idle;
 std::atomic_bool video_idle = false;
 
 void Video::play() {
@@ -90,17 +87,16 @@ void Video::play() {
 void Video::seek(std::int64_t target_us) {
     seek_time_us.store(target_us);
     seek_req.store(true);
-    while (!video_decode_idle.load()) auto _ = receiver.try_receive();
-    while (receiver.try_receive());
     video_idle.store(true);
-    while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+    while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
     video_idle.store(false);
 }
 
 bool Video::render() {
     window.render(screen.data());
     if (paused.load()) return true;
-    auto res = receiver.receive_timeout(std::chrono::milliseconds(1));
+    const std::chrono::duration<double> time_budget(1.0 / fps);
+    auto res = Frame::Video::receiver.receive_timeout(time_budget * 0.8);
     if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
     if (res) {
         auto* frame = res->frame;
@@ -117,11 +113,10 @@ bool Video::render() {
     return true;
 }
 
-Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name, RingBuf::Receiver<Decoder::Frame> receiver)
+Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name)
     : width(static_cast<std::size_t>(width)),
       height(static_cast<std::size_t>(height)),
       fps(fps),
       duration_us(duration_us),
       window(width, height, 1.0 / fps, name),
-      receiver(std::move(receiver)),
       screen(size(), 0) {}
