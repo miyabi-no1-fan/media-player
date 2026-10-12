@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <iostream>
 #include <limits>
@@ -13,6 +14,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavcodec/packet.h>
 #include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
 #include <libswresample/swresample.h>
@@ -28,6 +30,15 @@ static constexpr int AUDIO_PACKET_CHANNEL_SOFT_LIMNIT = 4;
 // hold an AVERROR code if < 0
 static std::atomic_int video_decoder_status = 0;
 static std::atomic_int audio_decoder_status = 0;
+
+std::atomic_bool seek_available = true;
+std::atomic_bool seek_req = false;
+std::atomic_int64_t seek_time_us = 0;
+
+std::atomic_bool video_decode_idle = false;
+std::atomic_bool audio_decode_idle = false;
+extern std::atomic_bool audio_idle;
+extern std::atomic_bool video_idle;
 
 std::thread Decoder::launch(RingBuf::Sender<Frame> video_sender,
                             RingBuf::Sender<Frame> audio_sender) {
@@ -48,6 +59,23 @@ std::thread Decoder::launch(RingBuf::Sender<Frame> video_sender,
             p = av_packet_alloc();
 
             while (video || audio) {
+                if (seek_req.load()) {
+                    std::int64_t ts = seek_time_us.load();
+                    avformat_seek_file(ictx, -1, ts - AV_TIME_BASE, ts, ts + AV_TIME_BASE, 0);
+                    while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+                    while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+                    if (video) avcodec_flush_buffers(video->decoder);
+                    if (audio) avcodec_flush_buffers(audio->decoder);
+                    if (audio && audio->swr)
+                        while (resample_audio(nullptr));
+                    seek_req.store(false);
+                }
+
+                if (video_decoder_status.load(std::memory_order::relaxed) < 0)
+                    video = std::nullopt;
+                if (audio_decoder_status.load(std::memory_order::relaxed) < 0)
+                    audio = std::nullopt;
+
                 unsigned long v = std::numeric_limits<unsigned long>::max();
                 if (video) v = video_packet_sender.len();
                 unsigned long a = std::numeric_limits<unsigned long>::max();
@@ -57,12 +85,10 @@ std::thread Decoder::launch(RingBuf::Sender<Frame> video_sender,
                     break;
                 }
                 std::this_thread::sleep_for(std::chrono::microseconds(10));
-                if (video_decoder_status.load(std::memory_order::relaxed) < 0)
-                    video = std::nullopt;
-                if (audio_decoder_status.load(std::memory_order::relaxed) < 0)
-                    audio = std::nullopt;
             }
         }
+
+        seek_available.store(false);
 
         if (video) video_packet_sender.drop_connection();
         if (audio) audio_packet_sender.drop_connection();
@@ -89,12 +115,22 @@ std::thread Decoder::launch_video_decoder(RingBuf::Sender<Frame> sender, SPSC::R
                         sender.send(std::move(f));
                         f.frame = av_frame_alloc();
                     }
+
+                    if (seek_req.load()) {
+                        video_decode_idle.store(true);
+                        while (receiver.try_receive());
+                        while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+                        video_decode_idle.store(false);
+                        break;
+                    }
                 }
             };
 
             while (auto rec = receiver.receive()) {
+                video_decode_idle.store(false);
                 if (avcodec_send_packet(video->decoder, rec->packet) >= 0)
                     receive_franes();
+                video_decode_idle.store(true);
             }
 
             int res = avcodec_send_packet(video->decoder, nullptr);
@@ -112,24 +148,11 @@ std::thread Decoder::launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::R
     assert(audio);
     return std::thread([this, sender = std::move(sender), receiver = std::move(receiver)]() mutable {
         try {
-            auto resample = [this](const AVFrame* input) -> std::expected<Frame, int> {
-                Frame out = av_frame_alloc();
-                int64_t sample_rate;
-                av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
-                out.frame->sample_rate = static_cast<int>(sample_rate);
-                av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, (AVSampleFormat*)&out.frame->format);
-                av_opt_get_chlayout(audio->swr, "out_chlayout", 0, &out.frame->ch_layout);
-                int res = swr_convert_frame(audio->swr, out.frame, input);
-                if (res < 0) return std::unexpected(res);
-                assert(out.frame);
-                return out;
-            };
-
             Frame f = av_frame_alloc();
             auto receive_franes = [&]() {
                 while (avcodec_receive_frame(audio->decoder, f.frame) >= 0) {
                     if (audio->swr) {
-                        auto res = resample(f.frame);
+                        auto res = resample_audio(f.frame);
                         if (!res) throw res.error();
                         av_frame_unref(f.frame);
                         sender.send(std::move(*res));
@@ -137,12 +160,22 @@ std::thread Decoder::launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::R
                         sender.send(std::move(f));
                         f = av_frame_alloc();
                     }
+
+                    if (seek_req.load()) {
+                        audio_decode_idle.store(true);
+                        while (receiver.try_receive());
+                        while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+                        audio_decode_idle.store(false);
+                        break;
+                    }
                 }
             };
 
             while (auto rec = receiver.receive()) {
+                audio_decode_idle.store(false);
                 if (avcodec_send_packet(audio->decoder, rec->packet) >= 0)
                     receive_franes();
+                audio_decode_idle.store(true);
             }
 
             int res = avcodec_send_packet(audio->decoder, nullptr);
@@ -150,7 +183,7 @@ std::thread Decoder::launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::R
             receive_franes();
 
             if (audio->swr) {
-                while (auto res = resample(nullptr)) {
+                while (auto res = resample_audio(nullptr)) {
                     if (res->frame->nb_samples == 0) break;
                     sender.send(std::move(*res));
                 }
@@ -161,4 +194,18 @@ std::thread Decoder::launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::R
             return;
         }
     });
+}
+
+std::expected<Decoder::Frame, int> Decoder::resample_audio(const AVFrame* input) {
+    Frame out = av_frame_alloc();
+    int64_t sample_rate;
+    av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
+    out.frame->sample_rate = static_cast<int>(sample_rate);
+    av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, (AVSampleFormat*)&out.frame->format);
+    av_opt_get_chlayout(audio->swr, "out_chlayout", 0, &out.frame->ch_layout);
+    int res = swr_convert_frame(audio->swr, out.frame, input);
+    if (res < 0) return std::unexpected(res);
+    assert(out.frame);
+    if (out.frame->nb_samples > 0) return out;
+    return std::unexpected(0);
 }

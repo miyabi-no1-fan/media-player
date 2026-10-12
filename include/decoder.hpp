@@ -51,6 +51,7 @@ class Decoder {
     struct VideoStream : Stream {
         SwsContext* sws = nullptr;
         VideoStream(Stream&& s) : Stream(std::move(s)) {
+            if (decoder->pix_fmt == AV_PIX_FMT_RGB24) return;
             // clang-format off
             sws = sws_getContext(
                 decoder->width, decoder->height, decoder->pix_fmt,
@@ -65,14 +66,13 @@ class Decoder {
     struct AudioStream : Stream {
         SwrContext* swr = nullptr;
         AudioStream(Stream&& s) : Stream(std::move(s)) {
-            AVSampleFormat format = supported_audio_formats.begin()->first;
-
+            // if format is supported, then we don't need swr
             auto it = supported_audio_formats.find(decoder->sample_fmt);
-            if (it != supported_audio_formats.end()) format = it->first;
+            if (it != supported_audio_formats.end()) return;
 
             // clang-format off
-            swr_alloc_set_opts2(&swr,
-                &decoder->ch_layout, format, decoder->sample_rate,
+            swr_alloc_set_opts2(&swr, // fallback to use swr if format is not supported
+                &decoder->ch_layout, supported_audio_formats.begin()->first, decoder->sample_rate,
                 &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
                 0, nullptr);
             // clang-format on
@@ -165,6 +165,11 @@ class Decoder {
         return std::nullopt;
     }
 
+    std::optional<std::int64_t> duration_us() const {
+        if (video) return ictx->duration;
+        return std::nullopt;
+    }
+
     // for audio
     std::optional<int> input_channels() const {
         if (audio) return audio->decoder->ch_layout.nb_channels;
@@ -246,4 +251,5 @@ class Decoder {
 
     std::thread launch_video_decoder(RingBuf::Sender<Frame> sender, SPSC::Receiver<Packet> receiver);
     std::thread launch_audio_decoder(RingBuf::Sender<Frame> sender, SPSC::Receiver<Packet> receiver);
+    std::expected<Frame, int> resample_audio(const AVFrame* input);
 };

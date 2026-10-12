@@ -35,8 +35,8 @@ int main(int argc, const char* argv[]) try {
 
     Decoder decoder(info.path.c_str());
 
-    auto [video_sender, video_receiver] = RingBuf::bounded_channel<Decoder::Frame>(10);
-    auto [audio_sender, audio_receiver] = RingBuf::bounded_channel<Decoder::Frame>(10);
+    auto [video_sender, video_receiver] = RingBuf::bounded_channel<Decoder::Frame>(4);
+    auto [audio_sender, audio_receiver] = RingBuf::bounded_channel<Decoder::Frame>(4);
 
     auto decode_thrd = decoder.launch(std::move(video_sender), std::move(audio_sender));
 
@@ -56,6 +56,7 @@ int main(int argc, const char* argv[]) try {
             static_cast<std::uint32_t>(*decoder.output_width()),
             static_cast<std::uint32_t>(*decoder.output_height()),
             std::round(*decoder.fps()),
+            *decoder.duration_us(),
             "vplayer: " + info.path,
             std::move(video_receiver));
     }
