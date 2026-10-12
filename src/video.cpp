@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -28,8 +29,8 @@ void Video::play() {
     bool key_right_locked = false;
     bool key_left_locked = false;
 
-    while (!window.should_close()) {
-        if (!render()) break;
+    while (render()) {
+        if (window.should_close()) std::quick_exit(0);
 
         switch (glfwGetKey(w, GLFW_KEY_SPACE)) {
             case GLFW_PRESS:
