@@ -37,7 +37,7 @@ int main(int argc, const char* argv[]) try {
     Frame::init_channels();
 
     Decoder decoder(info.path.c_str());
-    auto decode_thrd = decoder.launch();
+    decoder.launch().detach();
 
     std::unique_ptr<Audio> audio = nullptr;
     std::unique_ptr<Video> video = nullptr;
@@ -60,7 +60,6 @@ int main(int argc, const char* argv[]) try {
 
     if (audio) audio->play();
     if (video) video->play();
-    decode_thrd.detach();
 
     return 0;
 } catch (std::exception& e) {
