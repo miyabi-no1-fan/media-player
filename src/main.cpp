@@ -27,9 +27,11 @@ static constexpr char USAGE[] =
     "Play video and audio of a media file.\n"
     "\n"
     "Options:\n"
-    "    --help, -h              Show this message.\n"
-    "    --loop [n]              Loop the video for [n] times. If [n] < 0, loop forever\n"
-    "    --rotate [a]            Rotate the video by [a] degrees counter-clockwise\n";
+    "    --help, -h                     Show this message.\n"
+    "    --loop [n]                     Loop the video for [n] times. If [n] < 0, loop forever\n"
+    "    --rotate [a]                   Rotate the video by [a] degrees counter-clockwise\n"
+    "    --flip horizontally | h        Flip the video horizontally\n"
+    "           vertically   | v        Flip the video vertically\n";
 
 struct Info {
     std::string path;
@@ -138,6 +140,26 @@ Info parse(int argc, const char* argv[]) {
                     { std::sin(rad), std::cos(rad) },
                 };
                 info.transformation = rotation * info.transformation;
+            }
+
+            else if (arg.compare("--flip") == 0) {
+                i++;
+                std::string arg(argv[i]);
+                if (arg.compare("horizontally") == 0 ||
+                    arg.compare("h") == 0) {
+                    info.transformation = aglea::mat2x2{
+                        { -1, 0 },
+                        { 0, 1 },
+                    } * info.transformation;
+                } else if (arg.compare("vertically") == 0 ||
+                           arg.compare("v") == 0) {
+                    info.transformation = aglea::mat2x2{
+                        { 1, 0 },
+                        { 0, -1 },
+                    } * info.transformation;
+                } else {
+                    throw std::invalid_argument("Unknown argument for --flip");
+                }
             }
 
             else if (info.path.empty()) {
