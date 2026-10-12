@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -34,7 +35,7 @@ int Audio::callback(void* output_buffer, void* input_buffer, unsigned int nbuffe
                                static_cast<std::size_t>(self.channels);
 
     if (paused.load()) {
-        for (std::size_t i = 0; i < needed; i++) buffer[i] = T();
+        std::memset(buffer, 0, needed * sizeof(T));
         return 0;
     }
 
@@ -63,8 +64,8 @@ int Audio::callback(void* output_buffer, void* input_buffer, unsigned int nbuffe
 
     const std::size_t n = std::min(self.queue<T>().size(), needed);
     std::size_t i = 0;
-    for (; i < n; i++) buffer[i] = self.queue<T>()[i];
-    for (; i < needed; i++) buffer[i] = T();  // pad with silence
+    std::memcpy(buffer, self.queue<T>().data(), n * sizeof(T));
+    if (n < needed) std::memset(buffer + n, 0, (needed - n) * sizeof(T));
     self.queue<T>().erase(self.queue<T>().begin(), self.queue<T>().begin() + n);
 
     return 0;
