@@ -5,7 +5,10 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -22,10 +25,12 @@ static constexpr char USAGE[] =
     "Play video and audio of a media file.\n"
     "\n"
     "Options:\n"
-    "    --help, -h              Show this message.\n";
+    "    --help, -h              Show this message.\n"
+    "    --loop [n]              Loop the video for [n] times. If [n] < 0, loop forever\n";
 
 struct Info {
     std::string path;
+    int loop = 1;
 };
 
 Info parse(int argc, const char* argv[]);
@@ -33,33 +38,40 @@ Info parse(int argc, const char* argv[]);
 int main(int argc, const char* argv[]) try {
     Info info = parse(argc, argv);
 
-    Packet::init_channels();
-    Frame::init_channels();
-
-    Decoder decoder(info.path.c_str());
-    decoder.launch().detach();
-
-    std::unique_ptr<Audio> audio = nullptr;
     std::unique_ptr<Video> video = nullptr;
 
-    if (decoder.has_audio()) {
-        audio = std::make_unique<Audio>(
-            *decoder.output_channels(),
-            *decoder.output_sample_rate(),
-            rt_audio_format(*decoder.output_sample_format()));
-    }
+    for (int i = 0; i < info.loop; i++) {
+        if (video) video->clear_state();
 
-    if (decoder.has_video()) {
-        video = std::make_unique<Video>(
-            static_cast<std::uint32_t>(*decoder.output_width()),
-            static_cast<std::uint32_t>(*decoder.output_height()),
-            std::round(*decoder.fps()),
-            *decoder.duration_us(),
-            "vplayer: " + info.path);
-    }
+        Packet::init_channels();
+        Frame::init_channels();
 
-    if (audio) audio->play();
-    if (video) video->play();
+        Decoder decoder(info.path.c_str());
+        std::thread handle = decoder.launch();
+
+        std::unique_ptr<Audio> audio = nullptr;
+
+        if (decoder.has_audio()) {
+            audio = std::make_unique<Audio>(
+                *decoder.output_channels(),
+                *decoder.output_sample_rate(),
+                rt_audio_format(*decoder.output_sample_format()));
+        }
+
+        if (decoder.has_video() && video == nullptr) {
+            video = std::make_unique<Video>(
+                static_cast<std::uint32_t>(*decoder.output_width()),
+                static_cast<std::uint32_t>(*decoder.output_height()),
+                std::round(*decoder.fps()),
+                *decoder.duration_us(),
+                "vplayer: " + info.path);
+        }
+
+        if (audio) audio->play();
+        if (video) video->play();
+
+        handle.join();
+    }
 
     return 0;
 } catch (std::exception& e) {
@@ -95,6 +107,16 @@ Info parse(int argc, const char* argv[]) {
                 arg.compare("-h") == 0) {
                 help();
                 std::exit(0);
+            }
+
+            else if (arg.compare("--loop") == 0) {
+                i++;
+                std::istringstream iss(argv[i]);
+                iss >> info.loop;
+                if (!iss || !iss.eof()) {
+                    throw std::invalid_argument("Unknown argument for --loop");
+                }
+                if (info.loop < 0) info.loop = std::numeric_limits<decltype(info.loop)>::max();
             }
 
             else if (info.path.empty()) {
