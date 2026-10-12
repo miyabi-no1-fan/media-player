@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "app.hpp"
+#include "matrix.hpp"
 #include "ringbuf.hpp"
 #include "state.hpp"
 
@@ -94,7 +95,7 @@ void Video::seek(std::int64_t target_us) {
 }
 
 bool Video::render() {
-    window.render(screen.data());
+    window.render(screen.data(), transformation);
     if (paused.load()) return true;
     const std::chrono::duration<double> time_budget(1.0 / fps);
     auto res = Frame::Video::receiver.receive_timeout(time_budget * 0.8);
@@ -114,13 +115,14 @@ bool Video::render() {
     return true;
 }
 
-Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name)
+Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name, aglea::mat2x2 transformation)
     : width(static_cast<std::size_t>(width)),
       height(static_cast<std::size_t>(height)),
       fps(fps),
       duration_us(duration_us),
       window(width, height, 1.0 / fps, name),
-      screen(size(), 0) {}
+      screen(size(), 0),
+      transformation(transformation) {}
 
 void Video::clear_state() {
     current_frame = 0;

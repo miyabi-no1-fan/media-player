@@ -12,6 +12,7 @@
 #include "buffer.hpp"
 #include "descriptors.hpp"
 #include "image.hpp"
+#include "matrix.hpp"
 #include "pipeline.hpp"
 #include "window.hpp"
 
@@ -151,17 +152,17 @@ void App::create_swap_chain() {
     old_swap_chain = nullptr;
 }
 
-void App::render(const void* data) {
+void App::render(const void* data, mat2x2 transformation) {
     window.poll_events();
     if (auto i = acquire_next_frame()) {
-        update_global_ubo(*i);
+        update_global_ubo(*i, transformation);
         std::memcpy(staged_image->get_mapped_memory(), data, width * height * 3);
         record_command_buffer(*i);
         submit_frame(*i);
     }
 }
 
-void App::update_global_ubo(std::size_t i) {
+void App::update_global_ubo(std::size_t i, mat2x2 A) {
     float w = static_cast<float>(width);
     float h = static_cast<float>(height);
     float width_ratio = static_cast<float>(swap_chain->width()) / w;

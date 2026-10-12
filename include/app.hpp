@@ -20,7 +20,7 @@
 namespace aglea {
 
 struct GlobalUBO {
-    vec2 scale;
+    mat2x2 transformation = mat2x2::identity();
 };
 
 class App {
@@ -56,7 +56,7 @@ class App {
     ~App();
 
     // assume data size = width * height * 4 bytes
-    void render(const void* data);
+    void render(const void* data, mat2x2 transformation = mat2x2::identity());
     bool should_close() const { return window.should_close(); }
     GLFWwindow* get_window() const { return window.get_window(); }
 
@@ -67,7 +67,7 @@ class App {
 
    private:
     void create_swap_chain();
-    void update_global_ubo(std::size_t i);
+    void update_global_ubo(std::size_t i, mat2x2 transformation);
     void record_command_buffer(std::uint32_t i);
     std::optional<std::uint32_t> acquire_next_frame();
     void submit_frame(std::uint32_t i);

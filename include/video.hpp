@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "app.hpp"
+#include "matrix.hpp"
 
 class Video {
     std::size_t width;
@@ -17,9 +18,15 @@ class Video {
 
     aglea::App window;
     std::vector<std::uint8_t> screen;
+    aglea::mat2x2 transformation = aglea::mat2x2::identity();
 
    public:
-    Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name);
+    Video(std::uint32_t width,
+          std::uint32_t height,
+          double fps,
+          std::int64_t duration_us,
+          const std::string& name,
+          aglea::mat2x2 transformation = aglea::mat2x2::identity());
 
     Video(const Video&) = delete;
     Video& operator=(const Video&) = delete;
