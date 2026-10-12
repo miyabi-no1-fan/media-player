@@ -28,7 +28,8 @@ static constexpr char USAGE[] =
     "\n"
     "Options:\n"
     "    --help, -h              Show this message.\n"
-    "    --loop [n]              Loop the video for [n] times. If [n] < 0, loop forever\n";
+    "    --loop [n]              Loop the video for [n] times. If [n] < 0, loop forever\n"
+    "    --rotate [a]            Rotate the video by [a] degrees counter-clockwise\n";
 
 struct Info {
     std::string path;
