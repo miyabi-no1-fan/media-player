@@ -3,11 +3,8 @@
 import subprocess
 from pathlib import Path
 import shlex
-import os
 
 CC = "clang++"
-
-LIBRARIES = []
 
 # options: "Debug" "Release"
 BUILD_TYPE = "Debug"
