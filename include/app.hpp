@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 #include <vulkan/vulkan.hpp>
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 
 #include "buffer.hpp"
 #include "context.hpp"
@@ -56,6 +58,7 @@ class App {
     // assume data size = width * height * 4 bytes
     void render(const void* data);
     bool should_close() const { return window.should_close(); }
+    GLFWwindow* get_window() const { return window.get_window(); }
 
     App(const App&) = delete;
     App& operator=(const App&) = delete;
