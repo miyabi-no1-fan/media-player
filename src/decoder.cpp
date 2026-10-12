@@ -39,6 +39,11 @@ extern std::atomic_bool video_idle;
 
 std::thread Decoder::launch() {
     return std::thread([this]() mutable {
+        video_decoder_status.store(0);
+        audio_decoder_status.store(0);
+        seek_available.store(true);
+        seek_req.store(false);
+
         std::thread video_thrd, audio_thrd;
         if (video) video_thrd = launch_video_decoder();
         if (audio) audio_thrd = launch_audio_decoder();
