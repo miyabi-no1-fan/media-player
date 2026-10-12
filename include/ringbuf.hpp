@@ -12,6 +12,8 @@
 
 namespace RingBuf {
 
+static constexpr std::chrono::microseconds POLLING_INTERVAL = std::chrono::microseconds(50);
+
 enum class Error {
     EndOfInput,
     Timeout,
@@ -55,7 +57,7 @@ class Receiver {
         while (std::chrono::steady_clock::now() - start < timeout) {
             auto msg = try_receive();
             if (msg != std::unexpected(Error::Empty)) return msg;
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(POLLING_INTERVAL);
         }
         return std::unexpected(Error::Timeout);
     }
@@ -64,7 +66,7 @@ class Receiver {
         while (1) {
             auto msg = try_receive();
             if (msg != std::unexpected(Error::Empty)) return msg;
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(POLLING_INTERVAL);
         }
     }
 
@@ -146,7 +148,7 @@ class Sender {
         while (auto msg = try_send(std::move(message))) {
             if (std::chrono::steady_clock::now() - start >= timeout)
                 return msg;
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(POLLING_INTERVAL);
             message = std::move(*msg);
         }
         return std::nullopt;
@@ -154,14 +156,14 @@ class Sender {
 
     void send(T message) {
         while (auto msg = try_send(std::move(message))) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(POLLING_INTERVAL);
             message = std::move(*msg);
         }
     }
 
     void send_eof() {
         while (!try_send_eof()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(POLLING_INTERVAL);
         }
     }
 

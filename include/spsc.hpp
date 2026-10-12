@@ -11,6 +11,8 @@
 
 namespace SPSC {
 
+static constexpr std::chrono::microseconds POLLING_INTERVAL = std::chrono::microseconds(50);
+
 template <typename T>
 class Container {
     struct Node {
@@ -98,7 +100,7 @@ class Receiver {
         do {
             auto res = try_receive();
             if (res != std::unexpected(Error::Empty)) return res;
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(POLLING_INTERVAL);
         } while (std::chrono::steady_clock::now() - start < duration);
         return std::unexpected(Error::Timeout);
     }
@@ -108,7 +110,7 @@ class Receiver {
         while (1) {
             auto res = try_receive();
             if (res != std::unexpected(Error::Empty)) return res;
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
+            std::this_thread::sleep_for(POLLING_INTERVAL);
         }
     }
 
