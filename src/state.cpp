@@ -9,19 +9,6 @@ namespace Audio {
 SPSC::Sender<Decoder::Packet> sender;
 SPSC::Receiver<Decoder::Packet> receiver;
 }  // namespace Audio
-}  // namespace Packet
-
-namespace Frame {
-namespace Video {
-RingBuf::Sender<Decoder::Frame> sender;
-RingBuf::Receiver<Decoder::Frame> receiver;
-}  // namespace Video
-namespace Audio {
-RingBuf::Sender<Decoder::Frame> sender;
-RingBuf::Receiver<Decoder::Frame> receiver;
-}  // namespace Audio
-}  // namespace Frame
-
 void init_channels() {
     {
         auto [s, r] = SPSC::unbounded_channel<Decoder::Packet>();
@@ -33,7 +20,20 @@ void init_channels() {
         Packet::Audio::sender = std::move(s);
         Packet::Audio::receiver = std::move(r);
     }
+}
 
+}  // namespace Packet
+
+namespace Frame {
+namespace Video {
+RingBuf::Sender<Decoder::Frame> sender;
+RingBuf::Receiver<Decoder::Frame> receiver;
+}  // namespace Video
+namespace Audio {
+RingBuf::Sender<Decoder::Frame> sender;
+RingBuf::Receiver<Decoder::Frame> receiver;
+}  // namespace Audio
+void init_channels() {
     {
         auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(4);
         Frame::Video::sender = std::move(s);
@@ -45,3 +45,5 @@ void init_channels() {
         Frame::Audio::receiver = std::move(r);
     }
 }
+
+}  // namespace Frame

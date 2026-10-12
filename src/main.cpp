@@ -33,7 +33,8 @@ Info parse(int argc, const char* argv[]);
 int main(int argc, const char* argv[]) try {
     Info info = parse(argc, argv);
 
-    init_channels();
+    Packet::init_channels();
+    Frame::init_channels();
 
     Decoder decoder(info.path.c_str());
     auto decode_thrd = decoder.launch();

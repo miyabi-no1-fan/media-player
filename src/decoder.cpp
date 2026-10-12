@@ -64,7 +64,8 @@ std::thread Decoder::launch() {
                     if (video) avcodec_flush_buffers(video->decoder);
                     if (audio) avcodec_flush_buffers(audio->decoder);
                     if (audio && audio->swr) audio->create_swr();
-                    init_channels();
+                    ::Packet::init_channels();
+                    ::Frame::init_channels();
                     if (video) video_thrd = launch_video_decoder();
                     if (audio) audio_thrd = launch_audio_decoder();
                     seek_req.store(false);
