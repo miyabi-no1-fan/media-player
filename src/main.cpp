@@ -21,8 +21,8 @@
 #include "video.hpp"
 
 static constexpr char USAGE[] =
-    "Usage: vplayer [options] <file>\n"
-    "       vplayer --help\n"
+    "Usage: mplayer [options] <file>\n"
+    "       mplayer --help\n"
     "\n"
     "Play video and audio of a media file.\n"
     "\n"
@@ -74,7 +74,7 @@ int main(int argc, const char* argv[]) try {
                 static_cast<std::uint32_t>(*decoder.output_height()),
                 std::round(*decoder.fps()),
                 *decoder.duration_us(),
-                "vplayer: " + info.path,
+                "mplayer: " + info.path,
                 info.transformation);
         }
 
