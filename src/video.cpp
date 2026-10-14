@@ -46,7 +46,7 @@ void Video::play() {
 
         switch (glfwGetKey(w, GLFW_KEY_RIGHT)) {
             case GLFW_PRESS:
-                if (!key_right_locked) {
+                if (!key_right_locked && !key_space_locked) {
                     if (seek_available.load()) {
                         std::int64_t target_us =
                             std::clamp(frame_to_us(current_frame) + 3'000'000,
@@ -65,7 +65,7 @@ void Video::play() {
 
         switch (glfwGetKey(w, GLFW_KEY_LEFT)) {
             case GLFW_PRESS:
-                if (!key_left_locked) {
+                if (!key_left_locked && !key_space_locked && !key_right_locked) {
                     if (seek_available.load()) {
                         std::int64_t target_us =
                             std::clamp(frame_to_us(current_frame) - 3'000'000,
