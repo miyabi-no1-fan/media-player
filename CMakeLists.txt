@@ -8,8 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(LTO "Enable Link-time Optimization" ON)
 
 file(GLOB_RECURSE SRC CONFIGURE_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/include/*.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 add_executable(${PROJECT_NAME} ${SRC})
 
@@ -27,8 +26,13 @@ pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBAV)
 
-find_package(RtAudio REQUIRED)
-target_link_libraries(${PROJECT_NAME} PRIVATE RtAudio::rtaudio)
+find_package(RtAudio QUIET)
+if(RtAudio_FOUND)
+    target_link_libraries(${PROJECT_NAME} PRIVATE RtAudio::rtaudio)
+else()
+    pkg_check_modules(RtAudio REQUIRED IMPORTED_TARGET rtaudio)
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::RtAudio)
+endif()
 
 find_package(Vulkan REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
