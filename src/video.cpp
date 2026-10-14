@@ -87,6 +87,7 @@ void Video::play() {
 }
 
 void Video::seek(std::int64_t target_us) {
+    paused.store(false);
     seek_time_us.store(target_us);
     seek_req.store(true);
     video_idle.store(true);
