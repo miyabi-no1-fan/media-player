@@ -602,9 +602,9 @@ using vec2 = vec<float, 2>;
 using vec3 = vec<float, 3>;
 using vec4 = vec<float, 4>;
 
-using uvec2 = vec<std::uint32_t, 2>;
-using uvec3 = vec<std::uint32_t, 3>;
-using uvec4 = vec<std::uint32_t, 4>;
+using uvec2 = vec<unsigned, 2>;
+using uvec3 = vec<unsigned, 3>;
+using uvec4 = vec<unsigned, 4>;
 
 using mat2x2 = mat<float, 2, 2>;
 using mat3x3 = mat<float, 3, 3>;
