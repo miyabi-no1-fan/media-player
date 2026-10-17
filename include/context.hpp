@@ -14,7 +14,7 @@ struct SwapChainSupportDetails {
 };
 
 class Context {
-    #ifdef DNDEBUG
+    #ifdef NDEBUG
     const std::vector<const char*> validation_layers = {};
     #else
     const std::vector<const char*> validation_layers = { "VK_LAYER_KHRONOS_validation" };
