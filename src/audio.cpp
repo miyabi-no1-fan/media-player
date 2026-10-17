@@ -59,7 +59,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     }
 
     const std::size_t n = std::min(self.queue<T>().size(), needed);
-    std::size_t i = 0;
     std::memcpy(buffer, self.queue<T>().data(), n * sizeof(T));
     if (n < needed) std::memset(buffer + n, 0, (needed - n) * sizeof(T));
     self.queue<T>().erase(self.queue<T>().begin(), self.queue<T>().begin() + n);
