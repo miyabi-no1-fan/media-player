@@ -29,7 +29,7 @@ static const std::map<AVSampleFormat, RtAudioFormat> supported_audio_formats = {
     { AV_SAMPLE_FMT_S32, RTAUDIO_SINT32 },
 };
 
-static RtAudioFormat rt_audio_format(const AVSampleFormat& format) {
+inline RtAudioFormat rt_audio_format(const AVSampleFormat& format) {
     return supported_audio_formats.find(format)->second;
 }
 
