@@ -135,33 +135,39 @@ class Decoder {
 
     // for video
     std::optional<int> input_width() const {
-        if (video) return video->sws->src_w;
-        return std::nullopt;
+        if (!video) return std::nullopt;
+        if (video->sws) return video->sws->src_w;
+        return video->decoder->width;
     }
 
     std::optional<int> input_height() const {
-        if (video) return video->sws->src_h;
-        return std::nullopt;
+        if (!video) return std::nullopt;
+        if (video->sws) return video->sws->src_h;
+        return video->decoder->height;
     }
 
     std::optional<AVPixelFormat> input_pixel_format() const {
-        if (video) return static_cast<AVPixelFormat>(video->sws->src_format);
-        return std::nullopt;
+        if (!video) return std::nullopt;
+        if (video->sws) return static_cast<AVPixelFormat>(video->sws->src_format);
+        return video->decoder->pix_fmt;
     }
 
     std::optional<int> output_width() const {
-        if (video) return video->sws->dst_w;
-        return std::nullopt;
+        if (!video) return std::nullopt;
+        if (video->sws) return video->sws->dst_w;
+        return video->decoder->width;
     }
 
     std::optional<int> output_height() const {
-        if (video) return video->sws->dst_h;
-        return std::nullopt;
+        if (!video) return std::nullopt;
+        if (video->sws) return video->sws->dst_h;
+        return video->decoder->height;
     }
 
     std::optional<AVPixelFormat> output_pixel_format() const {
-        if (video) return static_cast<AVPixelFormat>(video->sws->dst_format);
-        return std::nullopt;
+        if (!video) return std::nullopt;
+        if (video->sws) return static_cast<AVPixelFormat>(video->sws->dst_format);
+        return video->decoder->pix_fmt;
     }
 
     std::optional<double> fps() const {
@@ -170,8 +176,7 @@ class Decoder {
     }
 
     std::optional<std::int64_t> duration_us() const {
-        if (video) return ictx->duration;
-        return std::nullopt;
+        return ictx->duration;
     }
 
     // for audio
@@ -191,32 +196,35 @@ class Decoder {
     }
 
     std::optional<int> output_channels() const {
-        if (audio) {
+        if (!audio) return std::nullopt;
+        if (audio->swr) {
             AVChannelLayout channel_layout;
             av_opt_get_chlayout(audio->swr, "out_chlayout", 0, &channel_layout);
             int channels = channel_layout.nb_channels;
             av_channel_layout_uninit(&channel_layout);
             return channels;
         }
-        return std::nullopt;
+        return audio->decoder->ch_layout.nb_channels;
     }
 
     std::optional<int> output_sample_rate() const {
+        if (!audio) return std::nullopt;
         if (audio) {
             int64_t sample_rate;
             av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
             return static_cast<int>(sample_rate);
         }
-        return std::nullopt;
+        return audio->decoder->sample_rate;
     }
 
     std::optional<AVSampleFormat> output_sample_format() const {
+        if (!audio) return std::nullopt;
         if (audio) {
             AVSampleFormat fmt;
             av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, &fmt);
             return fmt;
         }
-        return std::nullopt;
+        return audio->decoder->sample_fmt;
     }
 
    private:
