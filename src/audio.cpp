@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -67,7 +68,14 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
 }
 
 Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format)
-    : channels(channels),
+    : dac(RtAudio::UNSPECIFIED, [](RtAudioErrorType, const std::string& msg) {
+          #ifdef NDEBUG
+          (void)msg;
+          #else
+          std::cerr << msg << std::endl;
+          #endif
+      }),
+      channels(channels),
       sample_rate(sample_rate) {
     RtAudio::StreamParameters parameters;
     parameters.deviceId = dac.getDefaultOutputDevice();
