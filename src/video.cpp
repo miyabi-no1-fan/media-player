@@ -105,8 +105,6 @@ bool Video::render() {
         auto* frame = res->frame;
         std::size_t src_row_stride = static_cast<std::size_t>(frame->linesize[0]);
         std::uint8_t* src_data = static_cast<std::uint8_t*>(frame->data[0]);
-        std::size_t src_width = static_cast<std::size_t>(frame->width);
-        std::size_t src_height = static_cast<std::size_t>(frame->height);
         for (std::size_t i = 0; i < height; i++) {
             std::memcpy(screen.data() + i * row_stride(),
                         src_data + i * src_row_stride,
