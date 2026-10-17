@@ -9,7 +9,7 @@ CC = "clang++"
 # options: "Debug" "Release"
 BUILD_TYPE = "Debug"
 
-FLAGS = "-Wall -Werror -Wextra -Wno-unused"
+FLAGS = "-Wall -Wextra -Wpedantic -Werror"
 
 if BUILD_TYPE == "Release":
     FLAGS += " -DNDEBUG -O2 -march=native -mtune=native"
