@@ -15,7 +15,7 @@ SwapChain::SwapChain(const Context& ctx, vk::Extent2D extent, const SwapChain* o
     create_swap_chain(old_swap_chain);
     create_image_views();
     create_render_pass();
-    create_depth_resources();
+    // create_depth_resources();
     create_framebuffers();
     create_sync_objects();
 }
@@ -136,18 +136,18 @@ void SwapChain::create_image_views() {
 }
 
 void SwapChain::create_render_pass() {
-    vk::AttachmentDescription depth_attachment(
-        {},
-        find_depth_format(),
-        vk::SampleCountFlagBits::e1,
-        vk::AttachmentLoadOp::eClear,
-        vk::AttachmentStoreOp::eDontCare,
-        vk::AttachmentLoadOp::eDontCare,
-        vk::AttachmentStoreOp::eDontCare,
-        vk::ImageLayout::eUndefined,
-        vk::ImageLayout::eDepthStencilAttachmentOptimal);
+    // vk::AttachmentDescription depth_attachment(
+    //     {},
+    //     find_depth_format(),
+    //     vk::SampleCountFlagBits::e1,
+    //     vk::AttachmentLoadOp::eClear,
+    //     vk::AttachmentStoreOp::eDontCare,
+    //     vk::AttachmentLoadOp::eDontCare,
+    //     vk::AttachmentStoreOp::eDontCare,
+    //     vk::ImageLayout::eUndefined,
+    //     vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
-    vk::AttachmentReference depth_attachment_ref(1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+    // vk::AttachmentReference depth_attachment_ref(1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
     vk::AttachmentDescription color_attachment(
         {},
@@ -168,19 +168,19 @@ void SwapChain::create_render_pass() {
         {},
         color_attachment_ref,
         {},
-        &depth_attachment_ref,
+        {},  // &depth_attachment_ref,
         {});
 
     vk::SubpassDependency dependency(
         vk::SubpassExternal,
         0,
-        vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests,
-        vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests,
+        vk::PipelineStageFlagBits::eColorAttachmentOutput,  //  | vk::PipelineStageFlagBits::eEarlyFragmentTests,
+        vk::PipelineStageFlagBits::eColorAttachmentOutput,  //  | vk::PipelineStageFlagBits::eEarlyFragmentTests,
         vk::AccessFlagBits::eNone,
-        vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+        vk::AccessFlagBits::eColorAttachmentWrite,  // | vk::AccessFlagBits::eDepthStencilAttachmentWrite,
         {});
 
-    vk::AttachmentDescription attachments[] = { color_attachment, depth_attachment };
+    vk::AttachmentDescription attachments[] = { color_attachment };  // , depth_attachment
 
     render_pass = ctx.device->createRenderPassUnique(vk::RenderPassCreateInfo(
         {},
@@ -192,7 +192,7 @@ void SwapChain::create_render_pass() {
 void SwapChain::create_framebuffers() {
     frame_buffers.resize(image_count());
     for (size_t i = 0; i < image_count(); i++) {
-        vk::ImageView attachments[] = { *swap_chain_image_views[i], *depth_image_views[i] };
+        vk::ImageView attachments[] = { *swap_chain_image_views[i] };  // , *depth_image_views[i]
         frame_buffers[i] = ctx.device->createFramebufferUnique(vk::FramebufferCreateInfo(
             {},
             *render_pass,
@@ -203,43 +203,43 @@ void SwapChain::create_framebuffers() {
     }
 }
 
-void SwapChain::create_depth_resources() {
-    swap_chain_depth_format = find_depth_format();
+// void SwapChain::create_depth_resources() {
+//     swap_chain_depth_format = find_depth_format();
 
-    depth_images.resize(image_count());
-    depth_image_memorys.resize(image_count());
-    depth_image_views.resize(image_count());
+//     depth_images.resize(image_count());
+//     depth_image_memorys.resize(image_count());
+//     depth_image_views.resize(image_count());
 
-    for (size_t i = 0; i < depth_images.size(); i++) {
-        depth_images[i] = ctx.device->createImageUnique(vk::ImageCreateInfo(
-            {},
-            vk::ImageType::e2D,
-            swap_chain_depth_format,
-            vk::Extent3D(width(), height(), 1),
-            1,
-            1,
-            vk::SampleCountFlagBits::e1,
-            vk::ImageTiling::eOptimal,
-            vk::ImageUsageFlagBits::eDepthStencilAttachment,
-            vk::SharingMode::eExclusive,
-            {},
-            vk::ImageLayout::eUndefined));
-        vk::MemoryRequirements mem_requirements = ctx.device->getImageMemoryRequirements(*depth_images[i]);
-        depth_image_memorys[i] =
-            ctx.device->allocateMemoryUnique(
-                vk::MemoryAllocateInfo(
-                    mem_requirements.size,
-                    ctx.find_memory_type(mem_requirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)));
-        ctx.device->bindImageMemory(*depth_images[i], *depth_image_memorys[i], 0);
-        depth_image_views[i] = ctx.device->createImageViewUnique(vk::ImageViewCreateInfo(
-            {},
-            *depth_images[i],
-            vk::ImageViewType::e2D,
-            swap_chain_depth_format,
-            {},
-            vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1)));
-    }
-}
+//     for (size_t i = 0; i < depth_images.size(); i++) {
+//         depth_images[i] = ctx.device->createImageUnique(vk::ImageCreateInfo(
+//             {},
+//             vk::ImageType::e2D,
+//             swap_chain_depth_format,
+//             vk::Extent3D(width(), height(), 1),
+//             1,
+//             1,
+//             vk::SampleCountFlagBits::e1,
+//             vk::ImageTiling::eOptimal,
+//             vk::ImageUsageFlagBits::eDepthStencilAttachment,
+//             vk::SharingMode::eExclusive,
+//             {},
+//             vk::ImageLayout::eUndefined));
+//         vk::MemoryRequirements mem_requirements = ctx.device->getImageMemoryRequirements(*depth_images[i]);
+//         depth_image_memorys[i] =
+//             ctx.device->allocateMemoryUnique(
+//                 vk::MemoryAllocateInfo(
+//                     mem_requirements.size,
+//                     ctx.find_memory_type(mem_requirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal)));
+//         ctx.device->bindImageMemory(*depth_images[i], *depth_image_memorys[i], 0);
+//         depth_image_views[i] = ctx.device->createImageViewUnique(vk::ImageViewCreateInfo(
+//             {},
+//             *depth_images[i],
+//             vk::ImageViewType::e2D,
+//             swap_chain_depth_format,
+//             {},
+//             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eDepth, 0, 1, 0, 1)));
+//     }
+// }
 
 void SwapChain::create_sync_objects() {
     in_flight_fences.resize(MAX_FRAMES_IN_FLIGHT);
@@ -299,18 +299,18 @@ vk::Extent2D SwapChain::choose_swap_extent(const vk::SurfaceCapabilitiesKHR& cap
     }
 }
 
-vk::Format SwapChain::find_depth_format() {
-    constexpr auto features = vk::FormatFeatureFlagBits::eDepthStencilAttachment;
-    for (const auto& format : { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint }) {
-        auto properties = ctx.physical_device->getFormatProperties(format);
-        if ((properties.optimalTilingFeatures & features) == features) {
-            return format;
-        }
-        // if ((properties.linearTilingFeatures & features) == features) {
-        //     return format;
-        // }
-    }
-    throw std::runtime_error("failed to find supported format!");
-}
+// vk::Format SwapChain::find_depth_format() {
+//     constexpr auto features = vk::FormatFeatureFlagBits::eDepthStencilAttachment;
+//     for (const auto& format : { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint }) {
+//         auto properties = ctx.physical_device->getFormatProperties(format);
+//         if ((properties.optimalTilingFeatures & features) == features) {
+//             return format;
+//         }
+//         // if ((properties.linearTilingFeatures & features) == features) {
+//         //     return format;
+//         // }
+//     }
+//     throw std::runtime_error("failed to find supported format!");
+// }
 
 }  // namespace aglea
