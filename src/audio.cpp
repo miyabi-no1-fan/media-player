@@ -22,12 +22,8 @@ extern std::atomic_bool seek_req;
 std::atomic_bool audio_idle = false;
 
 template <typename T>
-int Audio::callback(void* output_buffer, void* input_buffer, unsigned int nbuffer_frames,
-                    double stream_time, RtAudioStreamStatus status, void* user_data) {
-    (void)input_buffer;
-    (void)stream_time;
-    (void)status;
-
+int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
+                    double, RtAudioStreamStatus, void* user_data) {
     Audio& self = *static_cast<Audio*>(user_data);
     T* buffer = static_cast<T*>(output_buffer);
 
