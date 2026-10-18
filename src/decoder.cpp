@@ -91,14 +91,14 @@ std::thread Decoder::launch() {
 
         seek_available.store(false);
 
-        if (video) ::Packet::Video::sender.drop_connection();
-        if (audio) ::Packet::Audio::sender.drop_connection();
+        ::Packet::Video::sender.drop_connection();
+        ::Packet::Audio::sender.drop_connection();
 
         if (video_thrd.joinable()) video_thrd.join();
         if (audio_thrd.joinable()) audio_thrd.join();
 
-        if (video) ::Frame::Video::sender.send_eof();
-        if (audio) ::Frame::Audio::sender.send_eof();
+        ::Frame::Video::sender.send_eof();
+        ::Frame::Audio::sender.send_eof();
     });
 }
 
