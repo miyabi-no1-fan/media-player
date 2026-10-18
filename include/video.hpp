@@ -10,10 +10,10 @@ class Video {
     std::size_t width;
     std::size_t height;
     std::size_t bpp = 3;
-    double fps;
+    std::int64_t frame_time_us;
     std::int64_t duration_us;
 
-    std::int64_t current_frame = 0;
+    std::int64_t current_us = 0;
 
     aglea::App window;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
@@ -35,12 +35,6 @@ class Video {
     std::size_t get_height() const { return height; }
     std::size_t row_stride() const { return width * bpp; }
     std::size_t size() const { return height * row_stride(); }
-    std::int64_t frame_to_us(std::int64_t frame) const {
-        return static_cast<std::int64_t>(static_cast<double>(frame) * (1'000'000.0 / fps));
-    }
-    std::int64_t us_to_frame(std::int64_t us) const {
-        return static_cast<std::int64_t>((static_cast<double>(us) / 1'000'000.0) * fps);
-    }
 
     void play();
 

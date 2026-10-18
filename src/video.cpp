@@ -1,6 +1,7 @@
 #include "video.hpp"
 
 extern "C" {
+#include <libavutil/avutil.h>
 #include <libavutil/frame.h>
 }
 #include <algorithm>
@@ -48,12 +49,11 @@ void Video::play() {
             case GLFW_PRESS:
                 if (!key_right_locked && !key_space_locked) {
                     if (seek_available.load()) {
-                        std::int64_t target_us =
-                            std::clamp(frame_to_us(current_frame) + 3'000'000,
+                        current_us =
+                            std::clamp(current_us + 3 * AV_TIME_BASE,
                                        std::int64_t(0),
                                        duration_us);
-                        seek(target_us);
-                        current_frame = us_to_frame(target_us);
+                        seek(current_us);
                     }
                 }
                 key_right_locked = true;
@@ -67,12 +67,11 @@ void Video::play() {
             case GLFW_PRESS:
                 if (!key_left_locked && !key_space_locked && !key_right_locked) {
                     if (seek_available.load()) {
-                        std::int64_t target_us =
-                            std::clamp(frame_to_us(current_frame) - 3'000'000,
+                        current_us =
+                            std::clamp(current_us - 3 * AV_TIME_BASE,
                                        std::int64_t(0),
                                        duration_us);
-                        seek(target_us);
-                        current_frame = us_to_frame(target_us);
+                        seek(current_us);
                     }
                 }
                 key_left_locked = true;
@@ -82,7 +81,7 @@ void Video::play() {
                 break;
         }
 
-        current_frame++;
+        current_us += frame_time_us;
     }
 }
 
@@ -100,8 +99,7 @@ bool Video::render() {
         window.render(nullptr, transformation);
         return true;
     }
-    const std::chrono::duration<double> time_budget(1.0 / fps);
-    auto res = Frame::Video::receiver.receive_timeout(time_budget * 0.8);
+    auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
     if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
     if (res) window.render(res->frame, transformation);
     else window.render(nullptr, transformation);
@@ -111,7 +109,7 @@ bool Video::render() {
 Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t duration_us, const std::string& name, aglea::mat2x2 transformation)
     : width(static_cast<std::size_t>(width)),
       height(static_cast<std::size_t>(height)),
-      fps(fps),
+      frame_time_us(static_cast<std::int64_t>(AV_TIME_BASE / fps)),
       duration_us(duration_us),
       window(width, height, 1.0 / fps, name),
       transformation(transformation) {}
