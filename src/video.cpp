@@ -1,20 +1,15 @@
 #include "video.hpp"
 
-#include <GLFW/glfw3.h>
-
-extern "C" {
-#include <libavutil/pixfmt.h>
-}
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
 #include <thread>
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 
-#include "app.hpp"
 #include "matrix.hpp"
 #include "ringbuf.hpp"
 #include "state.hpp"

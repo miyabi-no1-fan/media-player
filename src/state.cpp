@@ -1,5 +1,9 @@
 #include "state.hpp"
 
+#include "decoder.hpp"
+#include "ringbuf.hpp"
+#include "spsc.hpp"
+
 namespace Packet {
 namespace Video {
 SPSC::Sender<Decoder::Packet> sender;

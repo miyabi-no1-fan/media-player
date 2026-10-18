@@ -1,5 +1,3 @@
-#include <RtAudio.h>
-
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>

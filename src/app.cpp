@@ -19,8 +19,6 @@ extern "C" {
 #include "image.hpp"
 #include "matrix.hpp"
 #include "pipeline.hpp"
-#include "vulkan/vulkan.hpp"
-#include "window.hpp"
 
 template <typename A, typename B = A, typename C = A>
 static inline C div_ceil(const A& a, const B& b) {

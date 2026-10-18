@@ -1,6 +1,6 @@
 #include "image.hpp"
 
-#include <cstddef>
+#include <cstdint>
 #include <vulkan/vulkan.hpp>
 
 namespace aglea {
@@ -80,7 +80,7 @@ void Image::unmap() {
 }
 
 void Image::write_to_image(void* data, vk::DeviceSize size, vk::DeviceSize offset) {
-    memcpy(static_cast<std::byte*>(mapped) + offset, data, size);
+    memcpy(static_cast<std::uint8_t*>(mapped) + offset, data, size);
 }
 
 /**

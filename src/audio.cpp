@@ -2,7 +2,6 @@
 
 #include <RtAudio.h>
 
-#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -13,7 +12,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <variant>
 #include <vector>
 
 #include "state.hpp"

@@ -15,7 +15,6 @@ extern "C" {
 #include <libavcodec/packet.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
-#include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>

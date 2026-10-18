@@ -1,15 +1,5 @@
 #pragma once
 #include <RtAudio.h>
-
-#include <cstdint>
-#include <expected>
-#include <iostream>
-#include <map>
-#include <optional>
-#include <set>
-#include <stdexcept>
-#include <thread>
-#include <utility>
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavcodec/packet.h>
@@ -23,6 +13,15 @@ extern "C" {
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
+#include <cstdint>
+#include <expected>
+#include <iostream>
+#include <map>
+#include <optional>
+#include <set>
+#include <stdexcept>
+#include <thread>
+#include <utility>
 
 static const std::map<AVSampleFormat, RtAudioFormat> supported_audio_formats = {
     { AV_SAMPLE_FMT_FLT, RTAUDIO_FLOAT32 },
