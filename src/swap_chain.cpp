@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vulkan/vulkan.hpp>
@@ -257,14 +258,18 @@ void SwapChain::create_sync_objects() {
     }
 }
 
-vk::SurfaceFormatKHR SwapChain::choose_swap_surface_format(const std::vector<vk::SurfaceFormatKHR>& available_formats) {
-    for (const auto& format : available_formats) {
-        if ((format.format == vk::Format::eB8G8R8A8Unorm || format.format == vk::Format::eR8G8B8A8Unorm) &&
-            format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+vk::SurfaceFormatKHR SwapChain::choose_swap_surface_format(const std::vector<vk::SurfaceFormatKHR>& _available_formats) {
+    std::set<vk::SurfaceFormatKHR> available_formats(_available_formats.begin(), _available_formats.end());
+    constexpr vk::SurfaceFormatKHR preffered_surface_formats[] = {
+        { vk::Format::eB8G8R8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear },
+        { vk::Format::eR8G8B8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear },
+        { vk::Format::eB8G8R8A8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear },
+        { vk::Format::eR8G8B8A8Unorm, vk::ColorSpaceKHR::eSrgbNonlinear },
+    };
+    for (const auto& format : preffered_surface_formats)
+        if (available_formats.contains(format))
             return format;
-        }
-    }
-    return available_formats[0];
+    return _available_formats[0];
 }
 
 vk::PresentModeKHR SwapChain::choose_swap_present_mode(const std::vector<vk::PresentModeKHR>& available_present_modes) {
