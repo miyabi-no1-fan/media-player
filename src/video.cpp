@@ -2,6 +2,9 @@
 
 #include <GLFW/glfw3.h>
 
+extern "C" {
+#include <libavutil/pixfmt.h>
+}
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -10,7 +13,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <thread>
-#include <vector>
 
 #include "app.hpp"
 #include "matrix.hpp"
@@ -96,21 +98,15 @@ void Video::seek(std::int64_t target_us) {
 }
 
 bool Video::render() {
-    window.render(screen.data(), transformation);
-    if (paused.load()) return true;
+    if (paused.load()) {
+        window.render(nullptr, transformation);
+        return true;
+    }
     const std::chrono::duration<double> time_budget(1.0 / fps);
     auto res = Frame::Video::receiver.receive_timeout(time_budget * 0.8);
     if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-    if (res) {
-        auto* frame = res->frame;
-        std::size_t src_row_stride = static_cast<std::size_t>(frame->linesize[0]);
-        std::uint8_t* src_data = static_cast<std::uint8_t*>(frame->data[0]);
-        for (std::size_t i = 0; i < height; i++) {
-            std::memcpy(screen.data() + i * row_stride(),
-                        src_data + i * src_row_stride,
-                        row_stride());
-        }
-    }
+    if (res) window.render(res->frame, transformation);
+    else window.render(nullptr, transformation);
     return true;
 }
 
@@ -120,10 +116,8 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       fps(fps),
       duration_us(duration_us),
       window(width, height, 1.0 / fps, name),
-      screen(size(), 0),
       transformation(transformation) {}
 
 void Video::clear_state() {
     current_frame = 0;
-    screen.assign(size(), 0);
 }

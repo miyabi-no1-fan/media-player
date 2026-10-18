@@ -2,7 +2,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <vector>
 
 #include "app.hpp"
 #include "matrix.hpp"
@@ -17,7 +16,6 @@ class Video {
     std::int64_t current_frame = 0;
 
     aglea::App window;
-    std::vector<std::uint8_t> screen;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
 
    public:

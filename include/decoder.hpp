@@ -3,8 +3,10 @@
 
 #include <cstdint>
 #include <expected>
+#include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -33,6 +35,11 @@ inline RtAudioFormat rt_audio_format(const AVSampleFormat& format) {
     return supported_audio_formats.find(format)->second;
 }
 
+static const std::set<AVPixelFormat> supported_pixel_formats = {
+    AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_YUVJ420P,
+};
+
 class Decoder {
     AVFormatContext* ictx = nullptr;
 
@@ -49,11 +56,18 @@ class Decoder {
     struct VideoStream : Stream {
         SwsContext* sws = nullptr;
         VideoStream(Stream&& s) : Stream(std::move(s)) {
-            if (decoder->pix_fmt == AV_PIX_FMT_RGB24) return;
+            if (supported_pixel_formats.contains(decoder->pix_fmt)) return;
+            #ifndef NDEBUG
+            std::cout << "using software scaling\n";
+            #endif
+            create_sws();
+        }
+        void create_sws() {
+            sws_freeContext(sws);
             // clang-format off
             sws = sws_getContext(
                 decoder->width, decoder->height, decoder->pix_fmt,
-                decoder->width, decoder->height, AV_PIX_FMT_RGB24, // YUV format is cursed, do not use
+                decoder->width, decoder->height, AV_PIX_FMT_YUV420P,
                 SWS_BILINEAR, nullptr, nullptr, nullptr);
             // clang-format on
         }
@@ -64,10 +78,10 @@ class Decoder {
     struct AudioStream : Stream {
         SwrContext* swr = nullptr;
         AudioStream(Stream&& s) : Stream(std::move(s)) {
-            // if format is supported, then we don't need swr
-            auto it = supported_audio_formats.find(decoder->sample_fmt);
-            if (it != supported_audio_formats.end()) return;
-            // fallback to use swr if format is not supported
+            if (supported_audio_formats.contains(decoder->sample_fmt)) return;
+            #ifndef NDEBUG
+            std::cout << "using software resampling\n";
+            #endif
             create_swr();
         }
         void create_swr() {

@@ -4,16 +4,18 @@ layout(location = 0) out vec2 frag_color;
 
 layout(set = 0, binding = 0, std140) uniform UBO {
     vec4 _transformation;
+    bool is_color_range_jpeg;
+    bool is_color_space_bt709;
 };
 
-vec2 positions[4] = {
+const vec2 positions[4] = {
     vec2(-1, -1),
     vec2(1, -1),
     vec2(-1, 1),
     vec2(1, 1),
 };
 
-vec2 colors[4] = {
+const vec2 colors[4] = {
     vec2(0, 0),
     vec2(1, 0),
     vec2(0, 1),

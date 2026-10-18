@@ -9,13 +9,23 @@
 #include <stdexcept>
 #include <string>
 #include <vulkan/vulkan.hpp>
+extern "C" {
+#include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
+}
 
 #include "buffer.hpp"
 #include "descriptors.hpp"
 #include "image.hpp"
 #include "matrix.hpp"
 #include "pipeline.hpp"
+#include "vulkan/vulkan.hpp"
 #include "window.hpp"
+
+template <typename A, typename B = A, typename C = A>
+static inline C div_ceil(const A& a, const B& b) {
+    return (a / b) + (a % b != 0);
+}
 
 namespace aglea {
 
@@ -34,7 +44,7 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         DescriptorPool::Builder(ctx)
             .set_max_sets(swap_chain->image_count())
             .add_pool_size(vk::DescriptorType::eUniformBuffer, swap_chain->image_count())
-            .add_pool_size(vk::DescriptorType::eCombinedImageSampler, swap_chain->image_count())
+            .add_pool_size(vk::DescriptorType::eCombinedImageSampler, swap_chain->image_count() * 3)
             .build();
 
     global_ubo.resize(swap_chain->image_count());
@@ -48,23 +58,39 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         v->map();
     }
 
-    image_buffer.resize(swap_chain->image_count());
+    image_planes.resize(swap_chain->image_count());
+    mapped_images.resize(swap_chain->image_count());
+    mapped_image_layouts.resize(swap_chain->image_count());
     ctx.single_time_commands([this](const vk::UniqueCommandBuffer& cmd) {
         for (std::size_t i = 0; i < swap_chain->image_count(); i++) {
-            image_buffer[i] = std::make_unique<Image>(
-                ctx,
-                vk::ImageType::e2D,
-                vk::Format::eR8G8B8Unorm,
-                vk::Extent3D(this->width, this->height, 1),
-                vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
-                vk::MemoryPropertyFlagBits::eDeviceLocal);
-            image_buffer[i]->transition_image_layout(
-                cmd,
-                vk::ImageLayout::eGeneral,
-                {},
-                {},
-                vk::PipelineStageFlagBits::eTopOfPipe,
-                vk::PipelineStageFlagBits::eAllCommands);
+            for (std::size_t p = 0; p < 3; p++) {
+                std::uint32_t width = this->width;
+                std::uint32_t height = this->height;
+                if (p > 0) {
+                    width = div_ceil(width, 2);
+                    height = div_ceil(height, 2);
+                }
+                image_planes[i][p] = std::make_unique<Image>(
+                    ctx,
+                    vk::ImageType::e2D,
+                    vk::Format::eR8Unorm,
+                    vk::ImageTiling::eLinear,
+                    vk::Extent3D(width, height, 1),
+                    vk::ImageUsageFlagBits::eSampled,
+                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+                image_planes[i][p]->transition_image_layout(
+                    cmd,
+                    vk::ImageLayout::eGeneral,
+                    {},
+                    {},
+                    vk::PipelineStageFlagBits::eTopOfPipe,
+                    vk::PipelineStageFlagBits::eAllCommands);
+                image_planes[i][p]->map();
+                mapped_image_layouts[i][p] = ctx.device->getImageSubresourceLayout(
+                    *image_planes[i][p]->get_image(),
+                    vk::ImageSubresource{ vk::ImageAspectFlagBits::eColor, 0, 0 });
+                mapped_images[i][p] = static_cast<std::uint8_t*>(image_planes[i][p]->get_mapped_memory());
+            }
         }
     });
 
@@ -86,18 +112,12 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         vk::BorderColor::eFloatOpaqueBlack,
         vk::False));
 
-    staged_image = std::make_unique<Buffer>(
-        ctx,
-        3,
-        this->width * this->height,
-        vk::BufferUsageFlagBits::eTransferSrc,
-        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-    staged_image->map();
-
     descriptor_set_layout =
         DescriptorSetLayout::Builder(ctx)
             .add_binding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
-            .add_binding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, 1, &*image_sampler)
+            .add_binding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, &*image_sampler)
+            .add_binding(2, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, &*image_sampler)
+            .add_binding(3, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, &*image_sampler)
             .build();
 
     descriptor_sets.resize(swap_chain->image_count());
@@ -105,7 +125,9 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         descriptor_sets[i] =
             DescriptorWriter(ctx, *descriptor_set_layout, *descriptor_pool)
                 .write_buffer(0, global_ubo[i]->descriptor_info())
-                .write_image(1, image_buffer[i]->descriptor_info())
+                .write_image(1, image_planes[i][0]->descriptor_info())
+                .write_image(2, image_planes[i][1]->descriptor_info())
+                .write_image(3, image_planes[i][2]->descriptor_info())
                 .build();
     }
 
@@ -153,11 +175,12 @@ void App::create_swap_chain() {
     old_swap_chain = nullptr;
 }
 
-void App::render(const void* data, mat2x2 transformation) {
+void App::render(AVFrame* frame, mat2x2 transformation) {
     window.poll_events();
+    if (frame == nullptr) return;
     if (auto i = acquire_next_frame()) {
         update_global_ubo(*i, transformation);
-        std::memcpy(staged_image->get_mapped_memory(), data, width * height * 3);
+        draw(frame, *i);
         record_command_buffer(*i);
         submit_frame(*i);
     }
@@ -208,6 +231,26 @@ void App::update_global_ubo(std::size_t i, mat2x2 A) {
     v->transformation = norm * scale_to_fit * A * to_pixels_coord;
 }
 
+void App::draw(AVFrame* frame, std::uint32_t i) {
+    for (std::size_t p = 0; p < 3; p++) {
+        std::uint8_t* dst = mapped_images[i][p] + mapped_image_layouts[i][p].offset;
+        std::size_t dst_pitch = mapped_image_layouts[i][p].rowPitch;
+        const auto& extent = image_planes[i][p]->get_extent();
+
+        std::uint8_t* src = frame->data[p];
+        std::size_t src_pitch = frame->linesize[p];
+
+        for (std::size_t i = 0; i < extent.height; i++) {
+            std::memcpy(dst + i * dst_pitch,
+                        src + i * src_pitch,
+                        extent.width);
+        }
+    }
+    auto* v = static_cast<GlobalUBO*>(global_ubo[i]->get_mapped_memory());
+    v->is_color_range_jpeg = frame->color_range == AVCOL_RANGE_JPEG;
+    v->is_color_space_bt709 = frame->colorspace == AVCOL_SPC_BT709;
+}
+
 std::optional<std::uint32_t> App::acquire_next_frame() {
     std::uint32_t i;
     vk::Result res = swap_chain->acquire_next_image(i);
@@ -237,24 +280,6 @@ void App::record_command_buffer(std::uint32_t i) {
     if (!command_buffers[i].first) {
         auto& cmd = command_buffers[i].second;
         cmd->begin(vk::CommandBufferBeginInfo());
-
-        {
-            vk::MemoryBarrier before({}, vk::AccessFlagBits::eTransferWrite);
-            cmd->pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eTransfer, {}, before, {}, {});
-
-            // clang-format off
-            vk::BufferImageCopy region(
-                0, 0, 0,
-                vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                { 0, 0, 0 },
-                image_buffer[i]->get_extent()
-            );
-            // clang-format on
-            cmd->copyBufferToImage(*staged_image->get_buffer(), *image_buffer[i]->get_image(), vk::ImageLayout::eGeneral, region);
-
-            vk::MemoryBarrier after(vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead);
-            cmd->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {}, after, {}, {});
-        }
 
         vk::ClearValue clear_values[2];
         clear_values[0].color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f);

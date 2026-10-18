@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -7,6 +8,9 @@
 #include <vulkan/vulkan.hpp>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+extern "C" {
+#include <libavutil/frame.h>
+}
 
 #include "buffer.hpp"
 #include "context.hpp"
@@ -21,6 +25,8 @@ namespace aglea {
 
 struct GlobalUBO {
     mat2x2 transformation = mat2x2::identity();
+    std::uint32_t is_color_range_jpeg;
+    std::uint32_t is_color_space_bt709;
 };
 
 class App {
@@ -46,17 +52,17 @@ class App {
     std::unique_ptr<GraphicsPipeline> graphics_pipeline;
 
     std::vector<std::unique_ptr<Buffer>> global_ubo;
-    std::unique_ptr<Buffer> staged_image;
-    std::vector<std::unique_ptr<Image>> image_buffer;
+    std::vector<std::array<std::unique_ptr<Image>, 3>> image_planes;
     vk::UniqueSampler image_sampler;
+    std::vector<std::array<std::uint8_t*, 3>> mapped_images;
+    std::vector<std::array<vk::SubresourceLayout, 3>> mapped_image_layouts;
     std::vector<vk::UniqueDescriptorSet> descriptor_sets;
 
    public:
     App(std::uint32_t width, std::uint32_t height, double frame_time, const std::string& name);
     ~App();
 
-    // assume data size = width * height * 4 bytes
-    void render(const void* data, mat2x2 transformation = mat2x2::identity());
+    void render(AVFrame* frame, mat2x2 transformation = mat2x2::identity());
     bool should_close() const { return window.should_close(); }
     GLFWwindow* get_window() const { return window.get_window(); }
 
@@ -68,6 +74,7 @@ class App {
    private:
     void create_swap_chain();
     void update_global_ubo(std::size_t i, mat2x2 transformation);
+    void draw(AVFrame* frame, std::uint32_t i);
     void record_command_buffer(std::uint32_t i);
     std::optional<std::uint32_t> acquire_next_frame();
     void submit_frame(std::uint32_t i);
