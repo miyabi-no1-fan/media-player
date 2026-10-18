@@ -121,13 +121,12 @@ Info parse(int argc, const char* argv[]) {
     while (i < argc) {
         std::string arg(argv[i]);
         if (!arg.empty()) {
-            if (arg.compare("--help") == 0 ||
-                arg.compare("-h") == 0) {
+            if (arg == "--help" || arg == "-h") {
                 help();
                 std::exit(0);
             }
 
-            else if (arg.compare("--loop") == 0) {
+            else if (arg == "--loop") {
                 i++;
                 std::istringstream iss(argv[i]);
                 iss >> info.loop;
@@ -137,7 +136,7 @@ Info parse(int argc, const char* argv[]) {
                 if (info.loop < 0) info.loop = std::numeric_limits<decltype(info.loop)>::max();
             }
 
-            else if (arg.compare("--rotate") == 0) {
+            else if (arg == "--rotate") {
                 i++;
                 std::istringstream iss(argv[i]);
                 double deg;
@@ -153,17 +152,15 @@ Info parse(int argc, const char* argv[]) {
                 info.transformation = rotation * info.transformation;
             }
 
-            else if (arg.compare("--flip") == 0) {
+            else if (arg == "--flip") {
                 i++;
                 std::string arg(argv[i]);
-                if (arg.compare("horizontally") == 0 ||
-                    arg.compare("h") == 0) {
+                if (arg == "horizontally" || arg == "h") {
                     info.transformation = aglea::mat2x2{
                         { -1, 0 },
                         { 0, 1 },
                     } * info.transformation;
-                } else if (arg.compare("vertically") == 0 ||
-                           arg.compare("v") == 0) {
+                } else if (arg == "vertically" || arg == "v") {
                     info.transformation = aglea::mat2x2{
                         { 1, 0 },
                         { 0, -1 },
@@ -173,8 +170,7 @@ Info parse(int argc, const char* argv[]) {
                 }
             }
 
-            else if (arg.compare("--skip") == 0 ||
-                     arg.compare("-s") == 0) {
+            else if (arg == "--skip" || arg == "-s") {
                 i++;
                 std::istringstream iss(argv[i]);
                 iss >> info.skip;
@@ -187,15 +183,15 @@ Info parse(int argc, const char* argv[]) {
                 }
             }
 
-            else if (arg.compare("--no-video") == 0) {
+            else if (arg == "--no-video") {
                 info.no_video = true;
             }
 
-            else if (arg.compare("--no-audio") == 0) {
+            else if (arg == "--no-audio") {
                 info.no_audio = true;
             }
 
-            else if (arg.compare("--no-window") == 0) {
+            else if (arg == "--no-window") {
                 info.no_window = true;
                 info.no_video = true;
             }
