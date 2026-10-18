@@ -53,8 +53,6 @@ int main(int argc, const char* argv[]) try {
     std::unique_ptr<Video> video = nullptr;
 
     for (int i = 0; i < info.loop; i++) {
-        if (video) video->clear_state();
-
         Packet::init_channels();
         Frame::init_channels();
 
