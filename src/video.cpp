@@ -81,7 +81,8 @@ void Video::play() {
                 break;
         }
 
-        current_us += frame_time_us;
+        if (!paused.load())
+            current_us += frame_time_us;
     }
 }
 
