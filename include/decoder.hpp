@@ -20,6 +20,7 @@ extern "C" {
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -112,7 +113,7 @@ class Decoder {
         if (avformat_open_input(&ictx, path, nullptr, nullptr) < 0 ||
             avformat_find_stream_info(ictx, nullptr) < 0) {
             avformat_close_input(&ictx);
-            throw std::runtime_error("Cannot read input");
+            throw std::runtime_error("Cannot read input file: " + std::string(path));
         }
 
         std::int64_t ts = static_cast<std::int64_t>(skip) * AV_TIME_BASE;
