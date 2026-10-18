@@ -61,6 +61,21 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         m->is_color_space_bt709 = true;
     }
 
+    {
+        auto prop = ctx.physical_device->getFormatProperties(vk::Format::eR8Unorm);
+        // `context.cpp` already find for device with R8Unorm that support
+        // this required feature, a check here is just being defensive.
+        auto required = vk::FormatFeatureFlagBits::eSampledImage;
+        if ((prop.linearTilingFeatures & required) != required)
+            throw std::runtime_error("Device does not support required features.");
+
+        auto transfer = vk::FormatFeatureFlagBits::eTransferDst | vk::FormatFeatureFlagBits::eTransferSrc;
+        is_image_transfer_supported = (prop.linearTilingFeatures & transfer) == transfer;
+
+        auto filter = vk::FormatFeatureFlagBits::eSampledImageFilterLinear;
+        is_image_linear_filtering_supported = (prop.linearTilingFeatures & filter) == filter;
+    }
+
     image_planes.resize(swap_chain->image_count());
     mapped_images.resize(swap_chain->image_count());
     mapped_image_layouts.resize(swap_chain->image_count());
@@ -73,13 +88,16 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
                     width = div_ceil(width, 2);
                     height = div_ceil(height, 2);
                 }
+                vk::ImageUsageFlags usage_flags = vk::ImageUsageFlagBits::eSampled;
+                if (is_image_transfer_supported)
+                    usage_flags |= vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc;
                 image_planes[i][p] = std::make_unique<Image>(
                     ctx,
                     vk::ImageType::e2D,
                     vk::Format::eR8Unorm,
                     vk::ImageTiling::eLinear,
                     vk::Extent3D(width, height, 1),
-                    vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc,
+                    usage_flags,
                     vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
                 image_planes[i][p]->transition_image_layout(
                     cmd,
@@ -93,19 +111,31 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
                     *image_planes[i][p]->get_image(),
                     vk::ImageSubresource{ vk::ImageAspectFlagBits::eColor, 0, 0 });
                 mapped_images[i][p] = static_cast<std::uint8_t*>(image_planes[i][p]->get_mapped_memory());
-                cmd->clearColorImage(
-                    *image_planes[i][p]->get_image(),
-                    image_planes[i][p]->get_layout(),
-                    vk::ClearColorValue(p > 0 ? 0.5f : 0.f, 0.f, 0.f, 0.f),
-                    vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+                if (is_image_transfer_supported) {
+                    cmd->clearColorImage(
+                        *image_planes[i][p]->get_image(),
+                        image_planes[i][p]->get_layout(),
+                        vk::ClearColorValue(p > 0 ? 0.5f : 0.f, 0.f, 0.f, 0.f),
+                        vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+                } else {
+                    std::memset(
+                        mapped_images[i][p],
+                        p > 0 ? 128 : 0,
+                        mapped_image_layouts[i][p].size);
+                }
             }
         }
     });
 
+    vk::Filter filter =
+        (is_image_linear_filtering_supported)
+            ? vk::Filter::eLinear
+            : vk::Filter::eNearest;
+
     image_sampler = ctx.device->createSamplerUnique(vk::SamplerCreateInfo(
         {},
-        vk::Filter::eLinear,
-        vk::Filter::eLinear,
+        filter,
+        filter,
         vk::SamplerMipmapMode::eNearest,
         vk::SamplerAddressMode::eClampToEdge,
         vk::SamplerAddressMode::eClampToEdge,
@@ -251,19 +281,34 @@ void App::draw(AVFrame* frame, std::uint32_t i) {
         if (prev_image_index == i) return;
         ctx.single_time_commands([this, i](vk::UniqueCommandBuffer& cmd) {
             for (std::size_t p = 0; p < 3; p++) {
-                const auto& src = image_planes[prev_image_index][p];
-                const auto& dst = image_planes[i][p];
-                cmd->copyImage(
-                    *src->get_image(),
-                    src->get_layout(),
-                    *dst->get_image(),
-                    dst->get_layout(),
-                    vk::ImageCopy(
-                        vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                        vk::Offset3D(0, 0, 0),
-                        vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                        vk::Offset3D(0, 0, 0),
-                        std::min(dst->get_extent(), src->get_extent())));
+                if (is_image_transfer_supported) {
+                    const auto& src = image_planes[prev_image_index][p];
+                    const auto& dst = image_planes[i][p];
+                    cmd->copyImage(
+                        *src->get_image(),
+                        src->get_layout(),
+                        *dst->get_image(),
+                        dst->get_layout(),
+                        vk::ImageCopy(
+                            vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
+                            vk::Offset3D(0, 0, 0),
+                            vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
+                            vk::Offset3D(0, 0, 0),
+                            std::min(dst->get_extent(), src->get_extent())));
+                } else {
+                    std::uint8_t* src = mapped_images[prev_image_index][p] + mapped_image_layouts[prev_image_index][p].offset;
+                    std::size_t src_pitch = mapped_image_layouts[prev_image_index][p].rowPitch;
+                    std::uint8_t* dst = mapped_images[i][p] + mapped_image_layouts[i][p].offset;
+                    std::size_t dst_pitch = mapped_image_layouts[i][p].rowPitch;
+                    std::size_t height = std::min(
+                        static_cast<std::size_t>(image_planes[i][p]->get_extent().height),
+                        static_cast<std::size_t>(image_planes[prev_image_index][p]->get_extent().height));
+                    for (std::size_t i = 0; i < height; i++) {
+                        std::memcpy(dst + i * dst_pitch,
+                                    src + i * src_pitch,
+                                    std::min(dst_pitch, src_pitch));
+                    }
+                }
             }
         });
         return;

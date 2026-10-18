@@ -61,6 +61,9 @@ class App {
 
     std::uint32_t prev_image_index = std::numeric_limits<std::uint32_t>::max();
 
+    bool is_image_transfer_supported = false;
+    bool is_image_linear_filtering_supported = false;
+
    public:
     App(std::uint32_t width, std::uint32_t height, double frame_time, const std::string& name);
     ~App();
