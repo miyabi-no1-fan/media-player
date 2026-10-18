@@ -16,14 +16,13 @@ DescriptorSetLayout::Builder& DescriptorSetLayout::Builder::add_binding(
     std::uint32_t binding,
     vk::DescriptorType descriptor_type,
     vk::ShaderStageFlags stage_flags,
-    std::uint32_t count,
     vk::Sampler* immutableSampler) {
     assert(bindings.count(binding) == 0 && "Binding already in use");
     bindings[binding] =
         vk::DescriptorSetLayoutBinding(
             binding,
             descriptor_type,
-            count,
+            1,
             stage_flags,
             immutableSampler);
     return *this;
