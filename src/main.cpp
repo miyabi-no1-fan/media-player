@@ -66,11 +66,11 @@ int main(int argc, const char* argv[]) try {
                 rt_audio_format(*decoder.output_sample_format()));
         }
 
-        if (decoder.has_video() && video == nullptr) {
+        if (video == nullptr) {
             video = std::make_unique<Video>(
-                static_cast<std::uint32_t>(*decoder.output_width()),
-                static_cast<std::uint32_t>(*decoder.output_height()),
-                std::round(*decoder.fps()),
+                static_cast<std::uint32_t>(decoder.output_width().value_or(1)),
+                static_cast<std::uint32_t>(decoder.output_height().value_or(1)),
+                std::round(decoder.fps().value_or(60)),
                 decoder.duration_us(),
                 "mplayer: " + info.path,
                 info.transformation);
