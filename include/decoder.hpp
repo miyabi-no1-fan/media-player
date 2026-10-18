@@ -85,10 +85,18 @@ class Decoder {
             create_swr();
         }
         void create_swr() {
+            AVSampleFormat fmt;
+            auto it = supported_audio_formats.find(
+                av_sample_fmt_is_planar(decoder->sample_fmt)
+                    ? av_get_packed_sample_fmt(decoder->sample_fmt)
+                    : decoder->sample_fmt);
+            if (it != supported_audio_formats.end()) fmt = it->first;
+            else fmt = supported_audio_formats.begin()->first;
+
             swr_free(&swr);
             // clang-format off
             swr_alloc_set_opts2(&swr,
-                &decoder->ch_layout, supported_audio_formats.begin()->first, decoder->sample_rate,
+                &decoder->ch_layout, fmt, decoder->sample_rate,
                 &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
                 0, nullptr);
             // clang-format on
