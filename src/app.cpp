@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -181,6 +182,7 @@ void App::render(AVFrame* frame, mat2x2 transformation) {
         draw(frame, *i);
         record_command_buffer(*i);
         submit_frame(*i);
+        prev_image_index = *i;
     }
 }
 
@@ -230,13 +232,12 @@ void App::update_global_ubo(std::size_t i, mat2x2 A) {
 }
 
 void App::draw(AVFrame* frame, std::uint32_t i) {
-    static std::uint32_t prev_i = static_cast<std::uint32_t>(-1);
     if (frame == nullptr) {
-        if (prev_i == static_cast<std::uint32_t>(-1)) return;
-        if (prev_i == i) return;
-        ctx.single_time_commands([this, i, prev_i = prev_i](vk::UniqueCommandBuffer& cmd) {
+        if (prev_image_index == std::numeric_limits<std::uint32_t>::max()) return;
+        if (prev_image_index == i) return;
+        ctx.single_time_commands([this, i](vk::UniqueCommandBuffer& cmd) {
             for (std::size_t p = 0; p < 3; p++) {
-                const auto& src = image_planes[prev_i][p];
+                const auto& src = image_planes[prev_image_index][p];
                 const auto& dst = image_planes[i][p];
                 cmd->copyImage(
                     *src->get_image(),
@@ -277,7 +278,6 @@ void App::draw(AVFrame* frame, std::uint32_t i) {
     auto* v = static_cast<GlobalUBO*>(global_ubo[i]->get_mapped_memory());
     v->is_color_range_jpeg = frame->color_range == AVCOL_RANGE_JPEG;
     v->is_color_space_bt709 = frame->colorspace == AVCOL_SPC_BT709;
-    prev_i = i;
 }
 
 std::optional<std::uint32_t> App::acquire_next_frame() {

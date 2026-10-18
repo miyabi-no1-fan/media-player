@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -57,6 +58,8 @@ class App {
     std::vector<std::array<std::uint8_t*, 3>> mapped_images;
     std::vector<std::array<vk::SubresourceLayout, 3>> mapped_image_layouts;
     std::vector<vk::UniqueDescriptorSet> descriptor_sets;
+
+    std::uint32_t prev_image_index = std::numeric_limits<std::uint32_t>::max();
 
    public:
     App(std::uint32_t width, std::uint32_t height, double frame_time, const std::string& name);
