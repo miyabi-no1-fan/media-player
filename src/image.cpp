@@ -20,6 +20,7 @@ Image::Image(
     const Context& ctx,
     vk::ImageType type,
     vk::Format format,
+    vk::ImageTiling tiling,
     vk::Extent3D extent,
     vk::ImageUsageFlags usage_flags,
     vk::MemoryPropertyFlags memory_property_flags)
@@ -40,7 +41,7 @@ Image::Image(
                 1,
                 1,
                 vk::SampleCountFlagBits::e1,
-                vk::ImageTiling::eOptimal,
+                tiling,
                 usage_flags,
                 vk::SharingMode::eExclusive,
                 ctx.graphics_family_index,

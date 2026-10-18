@@ -12,6 +12,7 @@ class Image {
         const Context& ctx,
         vk::ImageType type,
         vk::Format format,
+        vk::ImageTiling tiling,
         vk::Extent3D extent,
         vk::ImageUsageFlags usage_flags,
         vk::MemoryPropertyFlags memory_property_flags);
@@ -82,6 +83,7 @@ static Image staging_buffer(
     vk::DeviceSize size,
     vk::ImageType type,
     vk::Format format,
+    vk::ImageTiling tiling,
     vk::Extent3D extent,
     vk::ImageUsageFlags usage,
     vk::MemoryPropertyFlags properties,
@@ -99,6 +101,7 @@ static Image staging_buffer(
         ctx,
         type,
         format,
+        tiling,
         extent,
         usage | vk::ImageUsageFlagBits::eTransferDst,
         properties);
