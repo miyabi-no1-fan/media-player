@@ -20,7 +20,7 @@ class DescriptorSetLayout {
             std::uint32_t binding,
             vk::DescriptorType descriptor_type,
             vk::ShaderStageFlags stage_flags,
-            vk::Sampler* immutableSampler = nullptr);
+            vk::Sampler* immutable_sampler = nullptr);
         std::unique_ptr<DescriptorSetLayout> build() const;
 
        private:

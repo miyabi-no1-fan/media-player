@@ -16,7 +16,7 @@ DescriptorSetLayout::Builder& DescriptorSetLayout::Builder::add_binding(
     std::uint32_t binding,
     vk::DescriptorType descriptor_type,
     vk::ShaderStageFlags stage_flags,
-    vk::Sampler* immutableSampler) {
+    vk::Sampler* immutable_sampler) {
     assert(bindings.count(binding) == 0 && "Binding already in use");
     bindings[binding] =
         vk::DescriptorSetLayoutBinding(
@@ -24,7 +24,7 @@ DescriptorSetLayout::Builder& DescriptorSetLayout::Builder::add_binding(
             descriptor_type,
             1,
             stage_flags,
-            immutableSampler);
+            immutable_sampler);
     return *this;
 }
 
