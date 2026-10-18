@@ -31,9 +31,9 @@ static constexpr char USAGE[] =
     "    --flip horizontally | h        Flip the video horizontally\n"
     "           vertically   | v        Flip the video vertically\n"
     "    --skip, -s [t]                 Skip the first [t] seconds of the media\n"
-    "    --no-video                     Don't play video"
-    "    --no-audio                     Don't play audio"
-    "    --no-window                    Don't open window, this also mean no video";
+    "    --no-video                     Don't play video\n"
+    "    --no-audio                     Don't play audio\n"
+    "    --no-window                    Don't open window, this also mean no video\n";
 
 struct Info {
     std::string path;
