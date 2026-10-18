@@ -71,7 +71,7 @@ int main(int argc, const char* argv[]) try {
                 static_cast<std::uint32_t>(*decoder.output_width()),
                 static_cast<std::uint32_t>(*decoder.output_height()),
                 std::round(*decoder.fps()),
-                *decoder.duration_us(),
+                decoder.duration_us(),
                 "mplayer: " + info.path,
                 info.transformation);
         }

@@ -196,7 +196,7 @@ class Decoder {
         return std::nullopt;
     }
 
-    std::optional<std::int64_t> duration_us() const {
+    std::int64_t duration_us() const {
         return ictx->duration;
     }
 
