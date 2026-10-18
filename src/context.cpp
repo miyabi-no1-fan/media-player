@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <vulkan/vulkan.hpp>
@@ -46,6 +47,7 @@ void Context::pick_physical_device() {
             break;
         }
     }
+    if (!physical_device) throw std::runtime_error("Can't find a suitable GPU.");
     physical_device->getProperties(&properties);
 }
 
