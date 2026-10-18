@@ -111,6 +111,7 @@ class Decoder {
     Decoder(const char* path, int skip = 0) {
         if (avformat_open_input(&ictx, path, nullptr, nullptr) < 0 ||
             avformat_find_stream_info(ictx, nullptr) < 0) {
+            avformat_close_input(&ictx);
             throw std::runtime_error("Cannot read input");
         }
 

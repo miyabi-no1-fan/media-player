@@ -209,7 +209,6 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
         return std::nullopt;
 
     AVCodecContext* decoder = avcodec_alloc_context3(codec);
-    avcodec_parameters_to_context(decoder, ictx->streams[index]->codecpar);
     switch (type) {
         case AVMEDIA_TYPE_VIDEO:
             decoder->thread_count = ::Frame::Video::CONCURRENT_LIMIT;
@@ -221,8 +220,11 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
             break;
         default: break;
     }
-    if (avcodec_open2(decoder, codec, nullptr) < 0)
+    if (avcodec_parameters_to_context(decoder, ictx->streams[index]->codecpar) < 0 ||
+        avcodec_open2(decoder, codec, nullptr) < 0) {
+        avcodec_free_context(&decoder);
         return std::nullopt;
+    }
     #ifndef NDEBUG
     if (decoder->active_thread_type & FF_THREAD_SLICE) {
         switch (type) {
