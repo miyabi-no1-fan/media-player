@@ -233,15 +233,22 @@ void App::draw(AVFrame* frame, std::uint32_t i) {
     for (std::size_t p = 0; p < 3; p++) {
         std::uint8_t* dst = mapped_images[i][p] + mapped_image_layouts[i][p].offset;
         std::size_t dst_pitch = mapped_image_layouts[i][p].rowPitch;
-        const auto& extent = image_planes[i][p]->get_extent();
 
         std::uint8_t* src = frame->data[p];
         std::size_t src_pitch = frame->linesize[p];
 
-        for (std::size_t i = 0; i < extent.height; i++) {
+        auto extent = image_planes[i][p]->get_extent();
+        std::size_t height = std::min(
+            static_cast<std::size_t>(extent.height),
+            static_cast<std::size_t>(frame->height));
+        std::size_t width = std::min(
+            static_cast<std::size_t>(extent.width),
+            static_cast<std::size_t>(frame->width));
+
+        for (std::size_t i = 0; i < height; i++) {
             std::memcpy(dst + i * dst_pitch,
                         src + i * src_pitch,
-                        extent.width);
+                        width);
         }
     }
     auto* v = static_cast<GlobalUBO*>(global_ubo[i]->get_mapped_memory());
