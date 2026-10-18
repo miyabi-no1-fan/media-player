@@ -22,9 +22,6 @@ extern "C" {
 
 #include "state.hpp"
 
-static constexpr int VIDEO_PACKET_CHANNEL_SOFT_LIMNIT = 4;
-static constexpr int AUDIO_PACKET_CHANNEL_SOFT_LIMNIT = 4;
-
 // hold an AVERROR code if < 0
 static std::atomic_int video_decoder_status = 0;
 static std::atomic_int audio_decoder_status = 0;
@@ -84,8 +81,8 @@ std::thread Decoder::launch() {
                 if (video) v = ::Packet::Video::sender.len();
                 unsigned long a = std::numeric_limits<unsigned long>::max();
                 if (audio) a = ::Packet::Audio::sender.len();
-                if (v <= VIDEO_PACKET_CHANNEL_SOFT_LIMNIT ||
-                    a <= AUDIO_PACKET_CHANNEL_SOFT_LIMNIT) {
+                if (v <= ::Packet::Video::SOFT_LIMIT ||
+                    a <= ::Packet::Audio::SOFT_LIMIT) {
                     break;
                 }
                 std::this_thread::sleep_for(std::chrono::microseconds(100));

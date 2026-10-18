@@ -39,12 +39,12 @@ RingBuf::Receiver<Decoder::Frame> receiver;
 }  // namespace Audio
 void init_channels() {
     {
-        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(4);
+        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(Video::CONCURRENT_LIMIT);
         Frame::Video::sender = std::move(s);
         Frame::Video::receiver = std::move(r);
     }
     {
-        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(4);
+        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(Audio::CONCURRENT_LIMIT);
         Frame::Audio::sender = std::move(s);
         Frame::Audio::receiver = std::move(r);
     }
