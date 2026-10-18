@@ -162,6 +162,11 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         command_buffers[i].first = false;
         command_buffers[i].second = std::move(cmd[i]);
     }
+
+    if (auto i = acquire_next_frame()) {
+        record_command_buffer(*i);
+        submit_frame(*i);
+    }
 }
 
 void App::create_swap_chain() {

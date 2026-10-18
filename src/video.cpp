@@ -114,11 +114,7 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       fps(fps),
       duration_us(duration_us),
       window(width, height, 1.0 / fps, name),
-      transformation(transformation) {
-    AVFrame* frame = av_frame_alloc();
-    window.render(frame, { { 0, 0 }, { 0, 0 } });
-    av_frame_free(&frame);
-}
+      transformation(transformation) {}
 
 void Video::clear_state() {
     current_frame = 0;
