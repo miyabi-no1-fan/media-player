@@ -259,7 +259,7 @@ void SwapChain::create_sync_objects() {
 
 vk::SurfaceFormatKHR SwapChain::choose_swap_surface_format(const std::vector<vk::SurfaceFormatKHR>& available_formats) {
     for (const auto& format : available_formats) {
-        if (format.format == vk::Format::eB8G8R8A8Unorm &&
+        if ((format.format == vk::Format::eB8G8R8A8Unorm || format.format == vk::Format::eR8G8B8A8Unorm) &&
             format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
             return format;
         }
