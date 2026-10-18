@@ -283,7 +283,7 @@ void App::record_command_buffer(std::uint32_t i) {
 
         vk::ClearValue clear_values[2];
         clear_values[0].color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f);
-        clear_values[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
+        // clear_values[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
         cmd->beginRenderPass(
             vk::RenderPassBeginInfo(
                 *swap_chain->get_render_pass(),
@@ -296,9 +296,9 @@ void App::record_command_buffer(std::uint32_t i) {
             0.0f,
             0.0f,
             static_cast<float>(extent.width),
-            static_cast<float>(extent.height),
-            0.0f,
-            1.0f);
+            static_cast<float>(extent.height));
+        //  0.0f,
+        //  1.0f);
         vk::Rect2D scissor = { { 0, 0 }, extent };
         cmd->setViewport(0, viewport);
         cmd->setScissor(0, scissor);
