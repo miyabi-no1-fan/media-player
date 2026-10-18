@@ -1,7 +1,9 @@
 #include "audio.hpp"
 
 #include <RtAudio.h>
-
+extern "C" {
+#include <libavutil/avutil.h>
+}
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -28,16 +30,16 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
 
     const std::size_t needed = static_cast<std::size_t>(nbuffer_frames) *
                                static_cast<std::size_t>(self.channels);
+    const std::int64_t sample_time_us = (static_cast<std::int64_t>(nbuffer_frames) * AV_TIME_BASE) /
+                                        static_cast<std::int64_t>(self.sample_rate);
 
     if (paused.load()) {
         std::memset(buffer, 0, needed * sizeof(T));
         return 0;
     }
 
-    const std::chrono::duration<double> sample_time(static_cast<double>(needed) / static_cast<double>(self.sample_rate));
-
     while (self.queue<T>().size() < needed) {
-        auto res = Frame::Audio::receiver.receive_timeout(sample_time * 0.8);
+        auto res = Frame::Audio::receiver.receive_timeout(std::chrono::microseconds(sample_time_us) * 0.8);
         if (!res) break;
         auto* frame = res->frame;
         assert(frame);
@@ -62,6 +64,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     if (n < needed) std::memset(buffer + n, 0, (needed - n) * sizeof(T));
     self.queue<T>().erase(self.queue<T>().begin(), self.queue<T>().begin() + n);
 
+    self.current_us += sample_time_us;
     return 0;
 }
 
@@ -74,7 +77,8 @@ Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat samp
           #endif
       }),
       channels(channels),
-      sample_rate(sample_rate) {
+      sample_rate(sample_rate),
+      current_us(0) {
     RtAudio::StreamParameters parameters;
     parameters.deviceId = dac.getDefaultOutputDevice();
     parameters.nChannels = channels;
