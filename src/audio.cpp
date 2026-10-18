@@ -34,10 +34,10 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         return 0;
     }
 
-    const std::chrono::duration<double> time_budget(static_cast<double>(needed) / static_cast<double>(self.sample_rate));
+    const std::chrono::duration<double> sample_time(static_cast<double>(needed) / static_cast<double>(self.sample_rate));
 
     while (self.queue<T>().size() < needed) {
-        auto res = Frame::Audio::receiver.receive_timeout(time_budget * 0.8);
+        auto res = Frame::Audio::receiver.receive_timeout(sample_time * 0.8);
         if (!res) break;
         auto* frame = res->frame;
         assert(frame);
@@ -79,19 +79,19 @@ Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat samp
     parameters.deviceId = dac.getDefaultOutputDevice();
     parameters.nChannels = channels;
     parameters.firstChannel = 0;
-    unsigned int buffer_frames = 256;
+    unsigned int buffer_frames = 512;
 
     RtAudioCallback x;
 
     // clang-format off
-        switch (sample_format) {
-            case RTAUDIO_FLOAT32: x = callback<float>; queues = std::vector<float>(); break;
-            case RTAUDIO_FLOAT64: x = callback<double>; queues = std::vector<double>(); break;
-            case RTAUDIO_SINT8: x = callback<std::int8_t>; queues = std::vector<std::int8_t>(); break;
-            case RTAUDIO_SINT16: x = callback<std::int16_t>; queues = std::vector<std::int16_t>(); break;
-            case RTAUDIO_SINT32: x = callback<std::int32_t>; queues = std::vector<std::int32_t>(); break;
-            default: throw std::runtime_error("Audio::Audio: Unknown sample format " + std::to_string(sample_format));
-        }
+    switch (sample_format) {
+        case RTAUDIO_FLOAT32: x = callback<float>; queues = std::vector<float>(); break;
+        case RTAUDIO_FLOAT64: x = callback<double>; queues = std::vector<double>(); break;
+        case RTAUDIO_SINT8: x = callback<std::int8_t>; queues = std::vector<std::int8_t>(); break;
+        case RTAUDIO_SINT16: x = callback<std::int16_t>; queues = std::vector<std::int16_t>(); break;
+        case RTAUDIO_SINT32: x = callback<std::int32_t>; queues = std::vector<std::int32_t>(); break;
+        default: throw std::runtime_error("Audio::Audio: Unknown sample format " + std::to_string(sample_format));
+    }
     // clang-format on
 
     if (dac.openStream(&parameters, nullptr, sample_format, sample_rate, &buffer_frames, x, this)) {
