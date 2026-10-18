@@ -55,6 +55,10 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
             vk::BufferUsageFlagBits::eUniformBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         v->map();
+        auto* m = static_cast<GlobalUBO*>(v->get_mapped_memory());
+        m->transformation = mat2x2::zeros();
+        m->is_color_range_jpeg = true;
+        m->is_color_space_bt709 = true;
     }
 
     image_planes.resize(swap_chain->image_count());
@@ -89,6 +93,11 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
                     *image_planes[i][p]->get_image(),
                     vk::ImageSubresource{ vk::ImageAspectFlagBits::eColor, 0, 0 });
                 mapped_images[i][p] = static_cast<std::uint8_t*>(image_planes[i][p]->get_mapped_memory());
+                cmd->clearColorImage(
+                    *image_planes[i][p]->get_image(),
+                    image_planes[i][p]->get_layout(),
+                    vk::ClearColorValue(p > 0 ? 0.5f : 0.f, 0.f, 0.f, 0.f),
+                    vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
             }
         }
     });
