@@ -30,13 +30,19 @@ static constexpr char USAGE[] =
     "    --rotate [a]                   Rotate the video by [a] degrees counter-clockwise\n"
     "    --flip horizontally | h        Flip the video horizontally\n"
     "           vertically   | v        Flip the video vertically\n"
-    "    --skip, -s [t]                 Skip the first [t] seconds of the media\n";
+    "    --skip, -s [t]                 Skip the first [t] seconds of the media\n"
+    "    --no-video                     Don't play video"
+    "    --no-audio                     Don't play audio"
+    "    --no-window                    Don't open window, this also mean no video";
 
 struct Info {
     std::string path;
     int loop = 1;
     int skip = 0;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
+    bool no_video = false;
+    bool no_audio = false;
+    bool no_window = false;
 };
 
 Info parse(int argc, const char* argv[]);
@@ -54,6 +60,9 @@ int main(int argc, const char* argv[]) try {
 
         Decoder decoder(info.path.c_str(), info.skip);
         info.skip = 0;
+        if (info.no_video ||
+            info.no_window) decoder.no_video();
+        if (info.no_audio) decoder.no_audio();
 
         std::thread handle = decoder.launch();
 
@@ -66,7 +75,7 @@ int main(int argc, const char* argv[]) try {
                 rt_audio_format(*decoder.output_sample_format()));
         }
 
-        if (video == nullptr) {
+        if (!info.no_window && video == nullptr) {
             video = std::make_unique<Video>(
                 static_cast<std::uint32_t>(decoder.output_width().value_or(1)),
                 static_cast<std::uint32_t>(decoder.output_height().value_or(1)),
@@ -176,6 +185,19 @@ Info parse(int argc, const char* argv[]) {
                     std::cout << "Warning: `--skip` expect a positive integer, found "
                               << info.skip << "\n";
                 }
+            }
+
+            else if (arg.compare("--no-video") == 0) {
+                info.no_video = true;
+            }
+
+            else if (arg.compare("--no-audio") == 0) {
+                info.no_audio = true;
+            }
+
+            else if (arg.compare("--no-window") == 0) {
+                info.no_window = true;
+                info.no_video = true;
             }
 
             else if (info.path.empty()) {
