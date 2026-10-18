@@ -249,19 +249,7 @@ class Decoder {
     }
 
    private:
-    std::optional<Stream> new_stream(AVMediaType type) {
-        const AVCodec* codec = nullptr;
-        int index = av_find_best_stream(ictx, type, -1, -1, &codec, 0);
-        if (index < 0 || codec == nullptr)
-            return std::nullopt;
-
-        AVCodecContext* decoder = avcodec_alloc_context3(codec);
-        avcodec_parameters_to_context(decoder, ictx->streams[index]->codecpar);
-        if (avcodec_open2(decoder, codec, nullptr) < 0)
-            return std::nullopt;
-
-        return Stream(index, codec, decoder);
-    }
+    std::optional<Stream> new_stream(AVMediaType type);
 
    public:
     struct Packet {
