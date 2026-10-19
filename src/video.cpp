@@ -37,65 +37,71 @@ void Video::play() {
     while (render()) {
         if (window.should_close()) std::quick_exit(0);
 
-        switch (glfwGetKey(w, GLFW_KEY_SPACE)) {
-            case GLFW_PRESS:
-                if (!key_space_locked)
-                    paused.store(!paused.load());
+        {
+            int key_space = glfwGetKey(w, GLFW_KEY_SPACE);
+
+            if (key_space == GLFW_PRESS) {
+                if (!key_space_locked) paused.store(!paused.load());
                 key_space_locked = true;
-                break;
-            case GLFW_RELEASE:
+            }
+
+            if (key_space == GLFW_RELEASE) {
                 key_space_locked = false;
-                break;
+            }
         }
 
-        switch (glfwGetKey(w, GLFW_KEY_RIGHT)) {
-            case GLFW_PRESS:
-                if (!key_right_locked && !key_space_locked) {
-                    if (seek_available.load()) {
-                        current_us =
-                            std::clamp(current_us + 3 * AV_TIME_BASE,
-                                       std::int64_t(0),
-                                       duration_us);
-                        seek(current_us);
-                    }
+        if (!key_left_locked) {
+            int key_right = glfwGetKey(w, GLFW_KEY_RIGHT);
+
+            if (key_right == GLFW_PRESS) {
+                if (!key_right_locked && seek_available.load()) {
+                    current_us = std::clamp(
+                        current_us + 3 * AV_TIME_BASE,
+                        std::int64_t(0),
+                        duration_us);
+                    seek(current_us);
                 }
                 key_right_locked = true;
-                break;
-            case GLFW_RELEASE:
+            }
+
+            if (key_right == GLFW_RELEASE) {
                 key_right_locked = false;
-                break;
+            }
         }
 
-        switch (glfwGetKey(w, GLFW_KEY_LEFT)) {
-            case GLFW_PRESS:
-                if (!key_left_locked && !key_space_locked && !key_right_locked) {
-                    if (seek_available.load()) {
-                        current_us =
-                            std::clamp(current_us - 3 * AV_TIME_BASE,
-                                       std::int64_t(0),
-                                       duration_us);
-                        seek(current_us);
-                    }
+        if (!key_right_locked) {
+            int key_left = glfwGetKey(w, GLFW_KEY_LEFT);
+
+            if (key_left == GLFW_PRESS) {
+                if (!key_left_locked && seek_available.load()) {
+                    current_us = std::clamp(
+                        current_us - 3 * AV_TIME_BASE,
+                        std::int64_t(0),
+                        duration_us);
+                    seek(current_us);
                 }
                 key_left_locked = true;
-                break;
-            case GLFW_RELEASE:
+            }
+
+            if (key_left == GLFW_RELEASE) {
                 key_left_locked = false;
-                break;
+            }
         }
 
-        float diff = get_cursor_absdiff();
-        if (diff <= std::numeric_limits<float>::epsilon()) {
-            static_cursor_us += frame_time_us;
-            if (static_cursor_us >= 2 * AV_TIME_BASE) {
-                hide_cursor();
+        {
+            float diff = get_cursor_absdiff();
+            if (diff <= std::numeric_limits<float>::epsilon()) {
+                static_cursor_us += frame_time_us;
+                if (static_cursor_us >= 2 * AV_TIME_BASE) {
+                    hide_cursor();
+                    static_cursor_us = 0;
+                    should_hide_progress_bar = true;
+                }
+            } else {
+                show_cursor();
                 static_cursor_us = 0;
-                should_hide_progress_bar = true;
+                should_hide_progress_bar = false;
             }
-        } else {
-            show_cursor();
-            static_cursor_us = 0;
-            should_hide_progress_bar = false;
         }
 
         if (!paused.load())
