@@ -32,6 +32,7 @@ void Video::play() {
     bool key_space_locked = false;
     bool key_right_locked = false;
     bool key_left_locked = false;
+    bool click_left_locked = false;
     std::int64_t static_cursor_us = 0;
 
     while (render()) {
@@ -47,6 +48,19 @@ void Video::play() {
 
             if (key_space == GLFW_RELEASE) {
                 key_space_locked = false;
+            }
+        }
+
+        {
+            int click_left = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT);
+
+            if (click_left == GLFW_PRESS) {
+                if (!click_left_locked) paused.store(!paused.load());
+                click_left_locked = true;
+            }
+
+            if (click_left == GLFW_RELEASE) {
+                click_left_locked = false;
             }
         }
 
