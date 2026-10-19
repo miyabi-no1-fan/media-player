@@ -7,9 +7,11 @@ extern "C" {
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <thread>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -30,6 +32,7 @@ void Video::play() {
     bool key_space_locked = false;
     bool key_right_locked = false;
     bool key_left_locked = false;
+    std::int64_t static_cursor_us = 0;
 
     while (render()) {
         if (window.should_close()) std::quick_exit(0);
@@ -81,6 +84,20 @@ void Video::play() {
                 break;
         }
 
+        float diff = get_cursor_absdiff();
+        if (diff <= std::numeric_limits<float>::epsilon()) {
+            static_cursor_us += frame_time_us;
+            if (static_cursor_us >= 2 * AV_TIME_BASE) {
+                hide_cursor();
+                static_cursor_us = 0;
+                should_hide_progress_bar = true;
+            }
+        } else {
+            show_cursor();
+            static_cursor_us = 0;
+            should_hide_progress_bar = false;
+        }
+
         if (!paused.load())
             current_us += frame_time_us;
     }
@@ -114,3 +131,33 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       duration_us(duration_us),
       window(width, height, 1.0 / fps, name),
       transformation(transformation) {}
+
+float Video::progress() const {
+    if (should_hide_progress_bar) return 0.f;
+    return static_cast<float>(current_us) /
+           static_cast<float>(duration_us);
+}
+
+void Video::get_cursor() {
+    double x, y;
+    glfwGetCursorPos(window.get_window(), &x, &y);
+    cursor_x = static_cast<float>(x);
+    cursor_y = static_cast<float>(y);
+}
+
+void Video::hide_cursor() {
+    glfwSetInputMode(window.get_window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+}
+
+void Video::show_cursor() {
+    glfwSetInputMode(window.get_window(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+}
+
+float Video::get_cursor_absdiff() {
+    float prev_x = cursor_x;
+    float prev_y = cursor_y;
+    get_cursor();
+    float diff_x = prev_x - cursor_x;
+    float diff_y = prev_y - cursor_y;
+    return std::sqrt(diff_x * diff_x + diff_y * diff_y);
+}

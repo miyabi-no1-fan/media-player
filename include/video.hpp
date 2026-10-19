@@ -18,6 +18,11 @@ class Video {
     aglea::App window;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
 
+    float cursor_x;
+    float cursor_y;
+
+    float should_hide_progress_bar = false;
+
    public:
     Video(std::uint32_t width,
           std::uint32_t height,
@@ -41,8 +46,9 @@ class Video {
    private:
     bool render();
     void seek(std::int64_t target_us);
-    float progress() const {
-        return static_cast<float>(current_us) /
-               static_cast<float>(duration_us);
-    }
+    float progress() const;
+    void get_cursor();
+    void hide_cursor();
+    void show_cursor();
+    float get_cursor_absdiff();
 };
