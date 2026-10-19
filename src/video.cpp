@@ -97,13 +97,13 @@ void Video::seek(std::int64_t target_us) {
 
 bool Video::render() {
     if (paused.load()) {
-        window.render(nullptr, transformation);
+        window.render(nullptr, progress(), transformation);
         return true;
     }
     auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
     if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-    if (res) window.render(res->frame, transformation);
-    else window.render(nullptr, transformation);
+    if (res) window.render(res->frame, progress(), transformation);
+    else window.render(nullptr, progress(), transformation);
     return true;
 }
 

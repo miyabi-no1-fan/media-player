@@ -19,6 +19,7 @@ extern "C" {
 #include "image.hpp"
 #include "matrix.hpp"
 #include "pipeline.hpp"
+#include "progress_bar.hpp"
 #include "swap_chain.hpp"
 #include "window.hpp"
 
@@ -64,11 +65,13 @@ class App {
     bool is_image_transfer_supported = false;
     bool is_image_linear_filtering_supported = false;
 
+    ProgressBar progress_bar;
+
    public:
     App(std::uint32_t width, std::uint32_t height, double frame_time, const std::string& name);
     ~App();
 
-    void render(AVFrame* frame, mat2x2 transformation = mat2x2::identity());
+    void render(AVFrame* frame, float progress, mat2x2 transformation = mat2x2::identity());
     bool should_close() const { return window.should_close(); }
     GLFWwindow* get_window() const { return window.get_window(); }
 

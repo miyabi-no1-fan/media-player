@@ -41,4 +41,8 @@ class Video {
    private:
     bool render();
     void seek(std::int64_t target_us);
+    float progress() const {
+        return static_cast<float>(current_us) /
+               static_cast<float>(duration_us);
+    }
 };

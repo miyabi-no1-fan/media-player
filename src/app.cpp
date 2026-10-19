@@ -41,8 +41,8 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
 
     descriptor_pool =
         DescriptorPool::Builder(ctx)
-            .set_max_sets(swap_chain->image_count())
-            .add_pool_size(vk::DescriptorType::eUniformBuffer, swap_chain->image_count())
+            .set_max_sets(swap_chain->image_count() * 2)
+            .add_pool_size(vk::DescriptorType::eUniformBuffer, swap_chain->image_count() * 2)
             .add_pool_size(vk::DescriptorType::eCombinedImageSampler, swap_chain->image_count() * 3)
             .build();
 
@@ -186,6 +186,8 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         "shaders/dist/shader.frag.spv",
         graphics_pipeline_config);
 
+    progress_bar = ProgressBar(ctx, *descriptor_pool, *swap_chain);
+
     command_buffers.resize(swap_chain->image_count());
     auto cmd = ctx.create_command_buffers(command_buffers.size());
     for (std::size_t i = 0; i < command_buffers.size(); i++) {
@@ -218,11 +220,12 @@ void App::create_swap_chain() {
     old_swap_chain = nullptr;
 }
 
-void App::render(AVFrame* frame, mat2x2 transformation) {
+void App::render(AVFrame* frame, float progress, mat2x2 transformation) {
     window.poll_events();
     if (frame == nullptr && !window.was_window_resized()) return;
     if (auto i = acquire_next_frame()) {
         update_global_ubo(*i, transformation);
+        progress_bar.update(progress, *i);
         draw(frame, *i);
         record_command_buffer(*i);
         submit_frame(*i);
@@ -371,7 +374,7 @@ void App::record_command_buffer(std::uint32_t i) {
 
         vk::ClearValue clear_values[2];
         clear_values[0].color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f);
-        // clear_values[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
+        clear_values[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
         cmd->beginRenderPass(
             vk::RenderPassBeginInfo(
                 *swap_chain->get_render_pass(),
@@ -384,9 +387,9 @@ void App::record_command_buffer(std::uint32_t i) {
             0.0f,
             0.0f,
             static_cast<float>(extent.width),
-            static_cast<float>(extent.height));
-        //  0.0f,
-        //  1.0f);
+            static_cast<float>(extent.height),
+            0.0f,
+            1.0f);
         vk::Rect2D scissor = { { 0, 0 }, extent };
         cmd->setViewport(0, viewport);
         cmd->setScissor(0, scissor);
@@ -399,6 +402,7 @@ void App::record_command_buffer(std::uint32_t i) {
             *descriptor_sets[i],
             {});
         cmd->draw(4, 1, 0, 0);
+        progress_bar.draw(cmd, i);
 
         cmd->endRenderPass();
         cmd->end();
