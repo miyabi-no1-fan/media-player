@@ -31,6 +31,13 @@ struct GlobalUBO {
     std::uint32_t is_color_space_bt709;
 };
 
+struct FrameInfo {
+    AVFrame* video = nullptr;
+    float progress = 0.f;
+    mat2x2 transform = mat2x2::identity();
+    bool is_paused = false;
+};
+
 class App {
     //
    public:
@@ -71,7 +78,7 @@ class App {
     App(std::uint32_t width, std::uint32_t height, double frame_time, const std::string& name);
     ~App();
 
-    void render(AVFrame* frame, float progress, mat2x2 transformation = mat2x2::identity());
+    void render(const FrameInfo& frame);
     bool should_close() const { return window.should_close(); }
     GLFWwindow* get_window() const { return window.get_window(); }
 

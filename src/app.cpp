@@ -220,13 +220,13 @@ void App::create_swap_chain() {
     old_swap_chain = nullptr;
 }
 
-void App::render(AVFrame* frame, float progress, mat2x2 transformation) {
+void App::render(const FrameInfo& frame) {
     window.poll_events();
-    if (frame == nullptr && !window.was_window_resized()) return;
+    if (frame.is_paused && !window.was_window_resized()) return;
     if (auto i = acquire_next_frame()) {
-        update_global_ubo(*i, transformation);
-        progress_bar.update(progress, *i);
-        draw(frame, *i);
+        update_global_ubo(*i, frame.transform);
+        progress_bar.update(frame.progress, *i);
+        draw(frame.video, *i);
         record_command_buffer(*i);
         submit_frame(*i);
         prev_image_index = *i;

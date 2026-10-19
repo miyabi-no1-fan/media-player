@@ -21,7 +21,7 @@ class Video {
     float cursor_x;
     float cursor_y;
 
-    float should_hide_progress_bar = false;
+    bool should_hide_progress_bar = false;
 
    public:
     Video(std::uint32_t width,

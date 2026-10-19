@@ -133,14 +133,18 @@ void Video::seek(std::int64_t target_us) {
 }
 
 bool Video::render() {
-    if (paused.load()) {
-        window.render(nullptr, progress(), transformation);
-        return true;
+    aglea::FrameInfo frame;
+    frame.is_paused = paused.load();
+    frame.progress = progress();
+    frame.transform = transformation;
+
+    if (!paused.load()) {
+        auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
+        if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
+        if (res) frame.video = res->frame;
     }
-    auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
-    if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-    if (res) window.render(res->frame, progress(), transformation);
-    else window.render(nullptr, progress(), transformation);
+
+    window.render(frame);
     return true;
 }
 
