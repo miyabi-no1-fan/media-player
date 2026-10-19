@@ -207,36 +207,13 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
     int index = av_find_best_stream(ictx, type, -1, -1, &codec, 0);
     if (index < 0 || codec == nullptr)
         return std::nullopt;
-
     AVCodecContext* decoder = avcodec_alloc_context3(codec);
-    switch (type) {
-        case AVMEDIA_TYPE_VIDEO:
-            decoder->thread_count = ::Frame::Video::CONCURRENT_LIMIT;
-            decoder->thread_type = FF_THREAD_SLICE;
-            break;
-        case AVMEDIA_TYPE_AUDIO:
-            decoder->thread_count = ::Frame::Audio::CONCURRENT_LIMIT;
-            decoder->thread_type = FF_THREAD_SLICE;
-            break;
-        default: break;
-    }
+    decoder->thread_count = 0;
+    decoder->thread_type = FF_THREAD_SLICE;
     if (avcodec_parameters_to_context(decoder, ictx->streams[index]->codecpar) < 0 ||
         avcodec_open2(decoder, codec, nullptr) < 0) {
         avcodec_free_context(&decoder);
         return std::nullopt;
     }
-    #ifndef NDEBUG
-    if (decoder->active_thread_type & FF_THREAD_SLICE) {
-        switch (type) {
-            case AVMEDIA_TYPE_VIDEO:
-                std::cout << "video decoding with FF_THREAD_SLICE\n";
-                break;
-            case AVMEDIA_TYPE_AUDIO:
-                std::cout << "audio decoding with FF_THREAD_SLICE\n";
-                break;
-            default: break;
-        }
-    }
-    #endif
     return Stream(index, codec, decoder);
 }
