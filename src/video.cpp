@@ -13,6 +13,7 @@ extern "C" {
 #include <cstdlib>
 #include <limits>
 #include <thread>
+#include <utility>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -141,7 +142,7 @@ bool Video::render() {
     if (!paused.load()) {
         auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
         if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-        if (res) frame.video = res->frame;
+        if (res) frame.video = std::move(*res);
     }
 
     window.render(frame);

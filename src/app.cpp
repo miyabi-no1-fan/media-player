@@ -226,7 +226,7 @@ void App::render(const FrameInfo& frame) {
     if (auto i = acquire_next_frame()) {
         update_global_ubo(*i, frame.transform);
         progress_bar.update(frame.progress, *i);
-        draw(frame.video, *i);
+        draw(frame.video.frame, *i);
         record_command_buffer(*i);
         submit_frame(*i);
         prev_image_index = *i;

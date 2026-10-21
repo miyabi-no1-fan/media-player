@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 #include <vulkan/vulkan.hpp>
+
+#include "decoder.hpp"
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 extern "C" {
@@ -15,6 +17,7 @@ extern "C" {
 
 #include "buffer.hpp"
 #include "context.hpp"
+#include "decoder.hpp"
 #include "descriptors.hpp"
 #include "image.hpp"
 #include "matrix.hpp"
@@ -32,7 +35,7 @@ struct GlobalUBO {
 };
 
 struct FrameInfo {
-    AVFrame* video = nullptr;
+    Decoder::Frame video = {};
     float progress = 0.f;
     mat2x2 transform = mat2x2::identity();
     bool is_paused = false;
