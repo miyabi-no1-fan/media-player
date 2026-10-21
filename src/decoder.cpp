@@ -61,6 +61,7 @@ std::thread Decoder::launch() {
                     ::Frame::init_channels();
                     if (video) video_thrd = launch_video_decoder();
                     if (audio) audio_thrd = launch_audio_decoder();
+                    audio_current_us.store(ts);
                     seek_req.store(false);
                 }
 

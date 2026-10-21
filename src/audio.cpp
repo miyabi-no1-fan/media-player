@@ -52,7 +52,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
 
         if (seek_req.load()) {
             self.queue<T>().clear();
-            audio_current_us.store(seek_time_us.load());
             audio_idle.store(true);
             while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
             audio_idle.store(false);
