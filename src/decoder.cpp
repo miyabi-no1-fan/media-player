@@ -111,6 +111,7 @@ std::thread Decoder::launch_video_decoder() {
                 while (avcodec_receive_frame(video->decoder, f.frame) >= 0) {
                     if (video->sws) {
                         Frame out = av_frame_alloc();
+                        av_frame_copy_props(out.frame, f.frame);
                         int res = sws_scale_frame(video->sws, out.frame, f.frame);
                         if (res < 0) throw res;
                         av_frame_unref(f.frame);
@@ -190,6 +191,7 @@ std::thread Decoder::launch_audio_decoder() {
 
 std::expected<Decoder::Frame, int> Decoder::resample_audio(const AVFrame* input) {
     Frame out = av_frame_alloc();
+    av_frame_copy_props(out.frame, input);
     int64_t sample_rate;
     av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
     out.frame->sample_rate = static_cast<int>(sample_rate);
