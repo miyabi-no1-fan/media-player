@@ -3,18 +3,23 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavcodec/packet.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
 #include <cstdint>
-#include <expected>
+#include <cstdio>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -43,36 +48,32 @@ static const std::set<AVPixelFormat> supported_pixel_formats = {
 class Decoder {
     AVFormatContext* ictx = nullptr;
 
+    std::string filter_descr;
+    struct Filter {
+        AVFilterGraph* graph = nullptr;
+        AVFilterContext* buffersrc_ctx = nullptr;
+        AVFilterContext* buffersink_ctx = nullptr;
+        operator bool() { return graph && buffersrc_ctx && buffersink_ctx; }
+        Filter() {}
+        ~Filter() {
+            avfilter_graph_free(&graph);
+        }
+    } filter;
+
     struct Stream {
         int stream_index = -1;
         const AVCodec* codec = nullptr;
         AVCodecContext* decoder = nullptr;
         ~Stream() { avcodec_free_context(&decoder); }
+        Stream() {}
         Stream(int i, const AVCodec* c, AVCodecContext* d) : stream_index(i), codec(c), decoder(d) {}
         Stream(const Stream&) = delete;
         Stream(Stream&& o) noexcept : stream_index(o.stream_index), codec(o.codec), decoder(std::exchange(o.decoder, nullptr)) {}
     };
 
     struct VideoStream : Stream {
-        SwsContext* sws = nullptr;
-        VideoStream(Stream&& s) : Stream(std::move(s)) {
-            if (supported_pixel_formats.contains(decoder->pix_fmt)) return;
-            #ifndef NDEBUG
-            std::cout << "using software scaling\n";
-            #endif
-            create_sws();
-        }
-        void create_sws() {
-            sws_freeContext(sws);
-            // clang-format off
-            sws = sws_getContext(
-                decoder->width, decoder->height, decoder->pix_fmt,
-                decoder->width, decoder->height, AV_PIX_FMT_YUV420P,
-                SWS_BILINEAR, nullptr, nullptr, nullptr);
-            // clang-format on
-        }
-        VideoStream(VideoStream&& o) noexcept : Stream(std::move(o)), sws(std::exchange(o.sws, nullptr)) {}
-        ~VideoStream() { sws_freeContext(sws); }
+        VideoStream(Stream&& s) : Stream(std::move(s)) {}
+        VideoStream(VideoStream&& o) noexcept : Stream(std::move(o)) {}
     };
 
     struct AudioStream : Stream {
@@ -121,6 +122,20 @@ class Decoder {
 
         if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video.emplace(std::move(*strm));
         if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio.emplace(std::move(*strm));
+
+        if (video) {
+            bool has_subtitle = false;
+            for (unsigned i = 0; i < ictx->nb_streams; i++) {
+                has_subtitle = ictx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE;
+                if (has_subtitle) break;
+            }
+            if (has_subtitle) {
+                filter_descr.resize(32 + std::strlen(path));
+                std::snprintf(filter_descr.data(), filter_descr.size(), "subtitles=filename='%s'", path);
+            } else {
+                filter_descr = "null";
+            }
+        }
     }
 
     void no_video() { video = std::nullopt; }
@@ -159,37 +174,31 @@ class Decoder {
     // for video
     std::optional<int> input_width() const {
         if (!video) return std::nullopt;
-        if (video->sws) return video->sws->src_w;
         return video->decoder->width;
     }
 
     std::optional<int> input_height() const {
         if (!video) return std::nullopt;
-        if (video->sws) return video->sws->src_h;
         return video->decoder->height;
     }
 
     std::optional<AVPixelFormat> input_pixel_format() const {
         if (!video) return std::nullopt;
-        if (video->sws) return static_cast<AVPixelFormat>(video->sws->src_format);
         return video->decoder->pix_fmt;
     }
 
     std::optional<int> output_width() const {
         if (!video) return std::nullopt;
-        if (video->sws) return video->sws->dst_w;
         return video->decoder->width;
     }
 
     std::optional<int> output_height() const {
         if (!video) return std::nullopt;
-        if (video->sws) return video->sws->dst_h;
         return video->decoder->height;
     }
 
     std::optional<AVPixelFormat> output_pixel_format() const {
         if (!video) return std::nullopt;
-        if (video->sws) return static_cast<AVPixelFormat>(video->sws->dst_format);
         return video->decoder->pix_fmt;
     }
 
@@ -274,7 +283,8 @@ class Decoder {
     };
 
    private:
+    int init_filters();
     std::thread launch_video_decoder();
     std::thread launch_audio_decoder();
-    std::expected<Frame, int> resample_audio(const AVFrame* input);
+    Frame resample_audio(const AVFrame* input);
 };

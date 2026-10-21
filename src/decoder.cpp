@@ -13,9 +13,15 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavcodec/packet.h>
+#include <libavfilter/avfilter.h>
+#include <libavfilter/buffersink.h>
+#include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/frame.h>
+#include <libavutil/mathematics.h>
+#include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 }
@@ -47,7 +53,14 @@ std::thread Decoder::launch() {
             while (video || audio) {
                 if (seek_req.load()) {
                     std::int64_t ts = seek_time_us.load();
-                    avformat_seek_file(ictx, -1, ts, ts, ts, 0);
+                    int stream_index = -1;
+                    if (audio) stream_index = audio->stream_index;
+                    else if (video) stream_index = video->stream_index;
+                    av_seek_frame(ictx,
+                                  stream_index,
+                                  av_rescale_q(ts, AV_TIME_BASE_Q, ictx->streams[stream_index]->time_base),
+                                  AVSEEK_FLAG_BACKWARD);
+
                     // while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
                     while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
                     while (::Frame::Video::receiver.try_receive());
@@ -56,6 +69,7 @@ std::thread Decoder::launch() {
                     if (audio_thrd.joinable()) audio_thrd.join();
                     if (video) avcodec_flush_buffers(video->decoder);
                     if (audio) avcodec_flush_buffers(audio->decoder);
+                    if (video) init_filters();
                     if (audio && audio->swr) audio->create_swr();
                     ::Packet::init_channels();
                     ::Frame::init_channels();
@@ -95,28 +109,50 @@ std::thread Decoder::launch() {
     });
 }
 
+#define TRY(expr)                        \
+    do {                                 \
+        int ret;                         \
+        if ((ret = expr) < 0) throw ret; \
+    } while (0)
+
 std::thread Decoder::launch_video_decoder() {
     assert(video);
     return std::thread([this]() mutable {
         try {
-            Frame f = av_frame_alloc();
+            auto send = [this](Frame& v) {
+                v.frame->time_base = ictx->streams[video->stream_index]->time_base;
+                Frame out = av_frame_alloc();
+                av_frame_ref(out.frame, v.frame);
+                ::Frame::Video::sender.send(std::move(out));
+                av_frame_unref(v.frame);
+            };
+
+            Frame decoded = av_frame_alloc();
             auto receive_franes = [&]() {
-                while (avcodec_receive_frame(video->decoder, f.frame) >= 0) {
-                    if (video->sws) {
-                        Frame out = av_frame_alloc();
-                        av_frame_copy_props(out.frame, f.frame);
-                        int res = sws_scale_frame(video->sws, out.frame, f.frame);
-                        if (res < 0) throw res;
-                        av_frame_unref(f.frame);
-                        out.frame->time_base = ictx->streams[video->stream_index]->time_base;
-                        ::Frame::Video::sender.send(std::move(out));
-                    } else {
-                        f.frame->time_base = ictx->streams[video->stream_index]->time_base;
-                        ::Frame::Video::sender.send(std::move(f));
-                        f.frame = av_frame_alloc();
+                while (avcodec_receive_frame(video->decoder, decoded.frame) >= 0) {
+                    if (!filter) init_filters();
+
+                    std::int64_t target_ts = av_rescale_q(
+                        audio_current_us.load(),
+                        AV_TIME_BASE_Q,
+                        ictx->streams[video->stream_index]->time_base);
+
+                    decoded.frame->pts = decoded.frame->best_effort_timestamp;
+
+                    if (decoded.frame->pts >= target_ts) {
+                        TRY(av_buffersrc_add_frame_flags(filter.buffersrc_ctx, decoded.frame, AV_BUFFERSRC_FLAG_KEEP_REF));
+                        Frame filtered = av_frame_alloc();
+                        av_frame_copy_props(filtered.frame, decoded.frame);
+                        while (1) {
+                            int res = av_buffersink_get_frame(filter.buffersink_ctx, filtered.frame);
+                            if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
+                            TRY(res);
+                            send(filtered);
+                            if (seek_req.load()) throw 0;
+                        }
                     }
 
-                    if (seek_req.load()) throw 0;
+                    av_frame_unref(decoded.frame);
                 }
             };
 
@@ -133,9 +169,18 @@ std::thread Decoder::launch_video_decoder() {
                 if (seek_req.load()) throw 0;
             }
 
-            int res = avcodec_send_packet(video->decoder, nullptr);
-            if (res < 0) throw res;
+            TRY(avcodec_send_packet(video->decoder, nullptr));
             receive_franes();
+
+            TRY(av_buffersrc_add_frame_flags(filter.buffersrc_ctx, nullptr, 0));
+            Frame filtered = av_frame_alloc();
+            av_frame_copy_props(filtered.frame, decoded.frame);
+            while (1) {
+                int res = av_buffersink_get_frame(filter.buffersink_ctx, filtered.frame);
+                if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
+                TRY(res);
+                send(filtered);
+            }
         } catch (int err) {
             if (err < 0) {
                 video_decoder_status.store(err, std::memory_order::relaxed);
@@ -150,18 +195,27 @@ std::thread Decoder::launch_audio_decoder() {
     assert(audio);
     return std::thread([this]() mutable {
         try {
-            Frame f = av_frame_alloc();
+            Frame decoded = av_frame_alloc();
             auto receive_franes = [&]() {
-                while (avcodec_receive_frame(audio->decoder, f.frame) >= 0) {
-                    if (audio->swr) {
-                        auto res = resample_audio(f.frame);
-                        if (!res) throw res.error();
-                        av_frame_unref(f.frame);
-                        ::Frame::Audio::sender.send(std::move(*res));
-                    } else {
-                        ::Frame::Audio::sender.send(std::move(f));
-                        f = av_frame_alloc();
+                while (avcodec_receive_frame(audio->decoder, decoded.frame) >= 0) {
+                    std::int64_t target_ts = av_rescale_q(
+                        audio_current_us.load(),
+                        AV_TIME_BASE_Q,
+                        ictx->streams[audio->stream_index]->time_base);
+
+                    decoded.frame->pts = decoded.frame->best_effort_timestamp;
+
+                    if (decoded.frame->pts >= target_ts) {
+                        if (audio->swr) {
+                            auto out = resample_audio(decoded.frame);
+                            ::Frame::Audio::sender.send(std::move(out));
+                        } else {
+                            ::Frame::Audio::sender.send(std::move(decoded));
+                        }
                     }
+
+                    if (decoded.frame) av_frame_unref(decoded.frame);
+                    else decoded = av_frame_alloc();
 
                     if (seek_req.load()) throw 0;
                 }
@@ -180,14 +234,14 @@ std::thread Decoder::launch_audio_decoder() {
                 if (seek_req.load()) throw 0;
             }
 
-            int res = avcodec_send_packet(audio->decoder, nullptr);
-            if (res < 0) throw res;
+            TRY(avcodec_send_packet(audio->decoder, nullptr));
             receive_franes();
 
             if (audio->swr) {
-                while (auto res = resample_audio(nullptr)) {
-                    if (res->frame->nb_samples == 0) break;
-                    ::Frame::Audio::sender.send(std::move(*res));
+                while (1) {
+                    auto out = resample_audio(nullptr);
+                    if (out.frame->nb_samples == 0) break;
+                    ::Frame::Audio::sender.send(std::move(out));
                 }
             }
         } catch (int err) {
@@ -200,18 +254,15 @@ std::thread Decoder::launch_audio_decoder() {
     });
 }
 
-std::expected<Decoder::Frame, int> Decoder::resample_audio(const AVFrame* input) {
+Decoder::Frame Decoder::resample_audio(const AVFrame* input) {
     Frame out = av_frame_alloc();
     int64_t sample_rate;
-    av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
+    TRY(av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate));
     out.frame->sample_rate = static_cast<int>(sample_rate);
-    av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, (AVSampleFormat*)&out.frame->format);
-    av_opt_get_chlayout(audio->swr, "out_chlayout", 0, &out.frame->ch_layout);
-    int res = swr_convert_frame(audio->swr, out.frame, input);
-    if (res < 0) return std::unexpected(res);
-    assert(out.frame);
-    if (out.frame->nb_samples > 0) return out;
-    return std::unexpected(0);
+    TRY(av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, (AVSampleFormat*)&out.frame->format));
+    TRY(av_opt_get_chlayout(audio->swr, "out_chlayout", 0, &out.frame->ch_layout));
+    TRY(swr_convert_frame(audio->swr, out.frame, input));
+    return out;
 }
 
 std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
@@ -228,4 +279,102 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
         return std::nullopt;
     }
     return Stream(index, codec, decoder);
+}
+
+// copy from https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c
+int Decoder::init_filters() {
+    filter = {};
+
+    char args[512];
+    int ret = 0;
+    const AVFilter* buffersrc = avfilter_get_by_name("buffer");
+    const AVFilter* buffersink = avfilter_get_by_name("buffersink");
+    AVFilterInOut* outputs = avfilter_inout_alloc();
+    AVFilterInOut* inputs = avfilter_inout_alloc();
+    AVRational time_base = ictx->streams[video->stream_index]->time_base;
+
+    filter.graph = avfilter_graph_alloc();
+    if (!outputs || !inputs || !filter.graph) {
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
+
+    /* buffer video source: the decoded frames from the decoder will be inserted here. */
+    snprintf(args,
+             sizeof(args),
+             "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:colorspace=%s:range=%s",
+             video->decoder->width,
+             video->decoder->height,
+             video->decoder->pix_fmt,
+             time_base.num,
+             time_base.den,
+             video->decoder->sample_aspect_ratio.num,
+             video->decoder->sample_aspect_ratio.den,
+             av_color_space_name(video->decoder->colorspace),
+             av_color_range_name(video->decoder->color_range));
+
+    ret = avfilter_graph_create_filter(&filter.buffersrc_ctx, buffersrc, "in", args, NULL, filter.graph);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+        goto end;
+    }
+
+    /* buffer video sink: to terminate the filter chain. */
+    filter.buffersink_ctx = avfilter_graph_alloc_filter(filter.graph, buffersink, "out");
+    if (!filter.buffersink_ctx) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
+
+    ret = av_opt_set(filter.buffersink_ctx, "pixel_formats", "yuv420p", AV_OPT_SEARCH_CHILDREN);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
+        goto end;
+    }
+
+    ret = avfilter_init_dict(filter.buffersink_ctx, NULL);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot initialize buffer sink\n");
+        goto end;
+    }
+
+    /*
+     * Set the endpoints for the filter graph. The filter_graph will
+     * be linked to the graph described by filters_descr.
+     */
+
+    /*
+     * The buffer source output must be connected to the input pad of
+     * the first filter described by filters_descr; since the first
+     * filter input label is not specified, it is set to "in" by
+     * default.
+     */
+    outputs->name = av_strdup("in");
+    outputs->filter_ctx = filter.buffersrc_ctx;
+    outputs->pad_idx = 0;
+    outputs->next = NULL;
+
+    /*
+     * The buffer sink input must be connected to the output pad of
+     * the last filter described by filters_descr; since the last
+     * filter output label is not specified, it is set to "out" by
+     * default.
+     */
+    inputs->name = av_strdup("out");
+    inputs->filter_ctx = filter.buffersink_ctx;
+    inputs->pad_idx = 0;
+    inputs->next = NULL;
+
+    if ((ret = avfilter_graph_parse_ptr(filter.graph, filter_descr.c_str(), &inputs, &outputs, NULL)) < 0)
+        goto end;
+
+    if ((ret = avfilter_graph_config(filter.graph, NULL)) < 0)
+        goto end;
+
+end:
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+
+    return ret;
 }
