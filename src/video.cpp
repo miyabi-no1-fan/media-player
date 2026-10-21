@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -108,7 +107,7 @@ void Video::play() {
 
         {
             float diff = get_cursor_absdiff();
-            if (diff <= std::numeric_limits<float>::epsilon()) {
+            if (diff <= std::numeric_limits<float>::epsilon() * 2) {
                 static_cursor_us += frame_time_us;
                 if (static_cursor_us >= 2 * AV_TIME_BASE) {
                     hide_cursor();
@@ -209,5 +208,5 @@ float Video::get_cursor_absdiff() {
     get_cursor();
     float diff_x = prev_x - cursor_x;
     float diff_y = prev_y - cursor_y;
-    return std::sqrt(diff_x * diff_x + diff_y * diff_y);
+    return diff_x * diff_x + diff_y * diff_y;
 }
