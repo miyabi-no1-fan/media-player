@@ -140,22 +140,22 @@ bool Video::render() {
             ? 0.f
             : static_cast<float>(current_us) / static_cast<float>(duration_us);
 
-    Decoder::Frame frame = nullptr;
+    Decoder::Frame decoded = nullptr;
     if (!paused.load()) {
         auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
         if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-        if (res) frame = std::move(*res);
+        if (res) decoded = std::move(*res);
     }
 
     window.poll_events();
 
-    if (frame.frame == nullptr &&
+    if (decoded.frame == nullptr &&
         !window.was_window_resized() &&
         progress == prev_progress)
         return true;
 
     if (auto i = renderer.acquire_next_frame()) {
-        tx_video->update(frame.frame, transformation, *i);
+        tx_video->update(decoded.frame, transformation, *i);
         tx_progress->update(progress, *i);
         renderer.record_command_buffer(*i);
         renderer.submit_frame(*i);
