@@ -120,9 +120,17 @@ std::thread Decoder::launch_video_decoder() {
                 }
             };
 
-            while (auto rec = ::Packet::Video::receiver.receive()) {
-                if (avcodec_send_packet(video->decoder, rec->packet) >= 0)
-                    receive_franes();
+            while (1) {
+                auto rec = ::Packet::Video::receiver.try_receive();
+                if (const auto& pkt = rec) {
+                    if (avcodec_send_packet(video->decoder, pkt->packet) >= 0)
+                        receive_franes();
+                } else {
+                    if (rec.error() == SPSC::Error::EndOfInput) break;
+                    else std::this_thread::sleep_for(std::chrono::microseconds(100));
+                }
+
+                if (seek_req.load()) throw 0;
             }
 
             int res = avcodec_send_packet(video->decoder, nullptr);
@@ -159,9 +167,17 @@ std::thread Decoder::launch_audio_decoder() {
                 }
             };
 
-            while (auto rec = ::Packet::Audio::receiver.receive()) {
-                if (avcodec_send_packet(audio->decoder, rec->packet) >= 0)
-                    receive_franes();
+            while (1) {
+                auto rec = ::Packet::Audio::receiver.try_receive();
+                if (const auto& pkt = rec) {
+                    if (avcodec_send_packet(audio->decoder, pkt->packet) >= 0)
+                        receive_franes();
+                } else {
+                    if (rec.error() == SPSC::Error::EndOfInput) break;
+                    else std::this_thread::sleep_for(std::chrono::microseconds(100));
+                }
+
+                if (seek_req.load()) throw 0;
             }
 
             int res = avcodec_send_packet(audio->decoder, nullptr);
