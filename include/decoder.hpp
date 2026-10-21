@@ -23,7 +23,6 @@ extern "C" {
 #include <iostream>
 #include <map>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -40,10 +39,7 @@ inline RtAudioFormat rt_audio_format(const AVSampleFormat& format) {
     return supported_audio_formats.find(format)->second;
 }
 
-static const std::set<AVPixelFormat> supported_pixel_formats = {
-    AV_PIX_FMT_YUV420P,
-    AV_PIX_FMT_YUVJ420P,
-};
+static constexpr const char* pixel_format = "yuv420p";
 
 class Decoder {
     AVFormatContext* ictx = nullptr;

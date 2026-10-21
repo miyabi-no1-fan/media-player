@@ -327,7 +327,7 @@ int Decoder::init_filters() {
         goto end;
     }
 
-    ret = av_opt_set(filter.buffersink_ctx, "pixel_formats", "yuv420p", AV_OPT_SEARCH_CHILDREN);
+    ret = av_opt_set(filter.buffersink_ctx, "pixel_formats", pixel_format, AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
         goto end;

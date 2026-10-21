@@ -15,7 +15,7 @@ if BUILD_TYPE == "Release":
     FLAGS += " -DNDEBUG -O2 -march=native -mtune=native"
     LTO = "ON"
 elif BUILD_TYPE == "Debug":
-    FLAGS += " -g -Og -fno-omit-frame-pointer"
+    FLAGS += " -g -Og -fno-omit-frame-pointer -fsanitize=address,undefined"
     LTO = "OFF"
 
 THREADS = 12
