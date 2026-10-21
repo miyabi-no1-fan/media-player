@@ -131,30 +131,29 @@ bool Video::render() {
     Decoder::Frame decoded = {};
     if (!paused.load()) {
         while (1) {
-            auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
-            if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-            if (res) {
-                std::int64_t pts = av_rescale_q(res->frame->best_effort_timestamp, res->frame->time_base, AV_TIME_BASE_Q);
-                if (!pts_offset) pts_offset = pts;
-                else pts -= *pts_offset;
+            auto res = Frame::Video::receiver.receive();
+            if (!res) return false;
 
-                std::int64_t target = audio_current_us.load();
+            std::int64_t pts = av_rescale_q(res->frame->best_effort_timestamp, res->frame->time_base, AV_TIME_BASE_Q);
+            if (!pts_offset) pts_offset = pts;
+            else pts -= *pts_offset;
 
-                if (pts < target - frame_time_us) {
-                    // underrun
-                    continue;
-                } else if (pts > target + frame_time_us) {
-                    // overrun
-                    while (pts > target + frame_time_us) {
-                        std::this_thread::sleep_for(std::chrono::microseconds(100));
-                        target = audio_current_us.load();
-                    }
-                    decoded = std::move(*res);
-                    break;
-                } else {
-                    decoded = std::move(*res);
-                    break;
+            std::int64_t target = audio_current_us.load();
+
+            if (pts < target - frame_time_us) {
+                // underrun
+                continue;
+            } else if (pts > target + frame_time_us) {
+                // overrun
+                while (pts > target + frame_time_us) {
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    target = audio_current_us.load();
                 }
+                decoded = std::move(*res);
+                break;
+            } else {
+                decoded = std::move(*res);
+                break;
             }
         }
     }
