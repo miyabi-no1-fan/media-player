@@ -1,9 +1,5 @@
 #include "video.hpp"
 
-extern "C" {
-#include <libavutil/avutil.h>
-#include <libavutil/frame.h>
-}
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -12,14 +8,21 @@ extern "C" {
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <memory>
 #include <thread>
 #include <utility>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+extern "C" {
+#include <libavutil/avutil.h>
+}
 
 #include "matrix.hpp"
 #include "ringbuf.hpp"
 #include "state.hpp"
+#include "textures.hpp"
+#include "textures/progress_bar.hpp"
+#include "textures/video_texture.hpp"
 
 std::atomic_bool paused = false;
 extern std::atomic_bool seek_available;
@@ -134,18 +137,33 @@ void Video::seek(std::int64_t target_us) {
 }
 
 bool Video::render() {
-    aglea::FrameInfo frame;
-    frame.is_paused = paused.load();
-    frame.progress = progress();
-    frame.transform = transformation;
+    float progress =
+        (should_hide_progress_bar)
+            ? 0.f
+            : static_cast<float>(current_us) / static_cast<float>(duration_us);
 
+    Decoder::Frame frame = nullptr;
     if (!paused.load()) {
         auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
         if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-        if (res) frame.video = std::move(*res);
+        if (res) frame = std::move(*res);
     }
 
-    window.render(frame);
+    window.poll_events();
+
+    if (frame.frame == nullptr &&
+        !window.was_window_resized() &&
+        progress == prev_progress)
+        return true;
+
+    if (auto i = renderer.acquire_next_frame()) {
+        tx_video->update(frame.frame, transformation, *i);
+        tx_progress->update(progress, *i);
+        renderer.record_command_buffer(*i);
+        renderer.submit_frame(*i);
+    }
+
+    prev_progress = progress;
     return true;
 }
 
@@ -154,13 +172,20 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       height(static_cast<std::size_t>(height)),
       frame_time_us(static_cast<std::int64_t>(AV_TIME_BASE / fps)),
       duration_us(duration_us),
-      window(width, height, 1.0 / fps, name),
-      transformation(transformation) {}
+      transformation(transformation),
+      window(width, height, name, 1.0 / fps),
+      renderer(window) {
+    tx_video = std::make_unique<aglea::VideoTexture>(renderer, width, height);
+    tx_progress = std::make_unique<aglea::ProgressBar>(renderer);
+    tx_video->init();
+    tx_progress->init();
+    renderer.textures.push_back(static_cast<aglea::Texture*>(tx_video.get()));
+    renderer.textures.push_back(static_cast<aglea::Texture*>(tx_progress.get()));
+    renderer.invalidate_command_buffers();
+}
 
-float Video::progress() const {
-    if (should_hide_progress_bar) return 0.f;
-    return static_cast<float>(current_us) /
-           static_cast<float>(duration_us);
+Video::~Video() {
+    renderer.ctx.device->waitIdle();
 }
 
 void Video::get_cursor() {

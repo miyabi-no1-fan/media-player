@@ -1,14 +1,11 @@
-#include "app.hpp"
+#include "textures/video_texture.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <stdexcept>
-#include <string>
 #include <vulkan/vulkan.hpp>
 extern "C" {
 #include <libavutil/frame.h>
@@ -18,69 +15,62 @@ extern "C" {
 #include "buffer.hpp"
 #include "descriptors.hpp"
 #include "image.hpp"
-#include "matrix.hpp"
 #include "pipeline.hpp"
+#include "renderer.hpp"
 
 template <typename A, typename B = A, typename C = A>
-static inline C div_ceil(const A& a, const B& b) {
+static inline constexpr C div_ceil(const A& a, const B& b) {
     return (a / b) + (a % b != 0);
 }
 
 namespace aglea {
 
-App::~App() {
-    ctx.device->waitIdle();
+void VideoTexture::init() {
+    check_supported_features();
+    create_ubo();
+    create_image_resources();
+    create_descriptors();
+    create_pipeline();
 }
 
-App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std::string& name)
-    : width(width),
-      height(height),
-      window(width, height, name, frame_time),
-      ctx(window) {
-    swap_chain = std::make_unique<SwapChain>(ctx, window.get_extent());
+void VideoTexture::check_supported_features() {
+    auto prop = renderer.ctx.physical_device->getFormatProperties(vk::Format::eR8Unorm);
+    // `context.cpp` already find for device with R8Unorm that support
+    // this required feature, a check here is just being defensive.
+    auto required = vk::FormatFeatureFlagBits::eSampledImage;
+    if ((prop.linearTilingFeatures & required) != required)
+        throw std::runtime_error("Device does not support required features.");
 
-    descriptor_pool =
-        DescriptorPool::Builder(ctx)
-            .set_max_sets(swap_chain->image_count() * 2)
-            .add_pool_size(vk::DescriptorType::eUniformBuffer, swap_chain->image_count() * 2)
-            .add_pool_size(vk::DescriptorType::eCombinedImageSampler, swap_chain->image_count() * 3)
-            .build();
+    auto transfer = vk::FormatFeatureFlagBits::eTransferDst | vk::FormatFeatureFlagBits::eTransferSrc;
+    is_image_transfer_supported = (prop.linearTilingFeatures & transfer) == transfer;
 
-    global_ubo.resize(swap_chain->image_count());
-    for (auto&& v : global_ubo) {
+    auto filter = vk::FormatFeatureFlagBits::eSampledImageFilterLinear;
+    is_image_linear_filtering_supported = (prop.linearTilingFeatures & filter) == filter;
+}
+
+void VideoTexture::create_ubo() {
+    ubo.resize(renderer.swap_chain->image_count());
+    for (auto&& v : ubo) {
         v = std::make_unique<Buffer>(
-            ctx,
-            sizeof(GlobalUBO),
+            renderer.ctx,
+            sizeof(UBO),
             1,
             vk::BufferUsageFlagBits::eUniformBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         v->map();
-        auto* m = static_cast<GlobalUBO*>(v->get_mapped_memory());
+        auto* m = static_cast<UBO*>(v->get_mapped_memory());
         m->transformation = mat2x2::zeros();
         m->is_color_range_jpeg = true;
         m->is_color_space_bt709 = true;
     }
+}
 
-    {
-        auto prop = ctx.physical_device->getFormatProperties(vk::Format::eR8Unorm);
-        // `context.cpp` already find for device with R8Unorm that support
-        // this required feature, a check here is just being defensive.
-        auto required = vk::FormatFeatureFlagBits::eSampledImage;
-        if ((prop.linearTilingFeatures & required) != required)
-            throw std::runtime_error("Device does not support required features.");
-
-        auto transfer = vk::FormatFeatureFlagBits::eTransferDst | vk::FormatFeatureFlagBits::eTransferSrc;
-        is_image_transfer_supported = (prop.linearTilingFeatures & transfer) == transfer;
-
-        auto filter = vk::FormatFeatureFlagBits::eSampledImageFilterLinear;
-        is_image_linear_filtering_supported = (prop.linearTilingFeatures & filter) == filter;
-    }
-
-    image_planes.resize(swap_chain->image_count());
-    mapped_images.resize(swap_chain->image_count());
-    mapped_image_layouts.resize(swap_chain->image_count());
-    ctx.single_time_commands([this](const vk::UniqueCommandBuffer& cmd) {
-        for (std::size_t i = 0; i < swap_chain->image_count(); i++) {
+void VideoTexture::create_image_resources() {
+    image_planes.resize(renderer.swap_chain->image_count());
+    mapped_images.resize(renderer.swap_chain->image_count());
+    mapped_image_layouts.resize(renderer.swap_chain->image_count());
+    renderer.ctx.single_time_commands([this](const vk::UniqueCommandBuffer& cmd) {
+        for (std::size_t i = 0; i < this->renderer.swap_chain->image_count(); i++) {
             for (std::size_t p = 0; p < 3; p++) {
                 std::uint32_t width = this->width;
                 std::uint32_t height = this->height;
@@ -92,7 +82,7 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
                 if (is_image_transfer_supported)
                     usage_flags |= vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc;
                 image_planes[i][p] = std::make_unique<Image>(
-                    ctx,
+                    this->renderer.ctx,
                     vk::ImageType::e2D,
                     vk::Format::eR8Unorm,
                     vk::ImageTiling::eLinear,
@@ -107,7 +97,7 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
                     vk::PipelineStageFlagBits::eTopOfPipe,
                     vk::PipelineStageFlagBits::eAllCommands);
                 image_planes[i][p]->map();
-                mapped_image_layouts[i][p] = ctx.device->getImageSubresourceLayout(
+                mapped_image_layouts[i][p] = this->renderer.ctx.device->getImageSubresourceLayout(
                     *image_planes[i][p]->get_image(),
                     vk::ImageSubresource{ vk::ImageAspectFlagBits::eColor, 0, 0 });
                 mapped_images[i][p] = static_cast<std::uint8_t*>(image_planes[i][p]->get_mapped_memory());
@@ -132,7 +122,7 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
             ? vk::Filter::eLinear
             : vk::Filter::eNearest;
 
-    image_sampler = ctx.device->createSamplerUnique(vk::SamplerCreateInfo(
+    image_sampler = renderer.ctx.device->createSamplerUnique(vk::SamplerCreateInfo(
         {},
         filter,
         filter,
@@ -149,95 +139,70 @@ App::App(std::uint32_t width, std::uint32_t height, double frame_time, const std
         0,
         vk::BorderColor::eFloatOpaqueBlack,
         vk::False));
+}
 
+void VideoTexture::create_descriptors() {
     descriptor_set_layout =
-        DescriptorSetLayout::Builder(ctx)
+        DescriptorSetLayout::Builder(renderer.ctx)
             .add_binding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
             .add_binding(1, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, &*image_sampler)
             .add_binding(2, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, &*image_sampler)
             .add_binding(3, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, &*image_sampler)
             .build();
 
-    descriptor_sets.resize(swap_chain->image_count());
-    for (std::size_t i = 0; i < swap_chain->image_count(); i++) {
+    descriptor_sets.resize(renderer.swap_chain->image_count());
+    for (std::size_t i = 0; i < renderer.swap_chain->image_count(); i++) {
         descriptor_sets[i] =
-            DescriptorWriter(ctx, *descriptor_set_layout, *descriptor_pool)
-                .write_buffer(0, global_ubo[i]->descriptor_info())
+            DescriptorWriter(renderer.ctx, *descriptor_set_layout, *renderer.descriptor_pool)
+                .write_buffer(0, ubo[i]->descriptor_info())
                 .write_image(1, image_planes[i][0]->descriptor_info())
                 .write_image(2, image_planes[i][1]->descriptor_info())
                 .write_image(3, image_planes[i][2]->descriptor_info())
                 .build();
     }
+}
 
-    graphics_pipeline_layout =
-        ctx.device->createPipelineLayoutUnique(vk::PipelineLayoutCreateInfo(
+void VideoTexture::create_pipeline() {
+    pipeline_layout =
+        renderer.ctx.device->createPipelineLayoutUnique(vk::PipelineLayoutCreateInfo(
             vk::PipelineLayoutCreateFlags(),
             *descriptor_set_layout->get_descriptor_set_layout()));
 
-    auto graphics_pipeline_config = GraphicsPipeline::default_config();
-    graphics_pipeline_config.input_assembly.setTopology(vk::PrimitiveTopology::eTriangleStrip);
+    auto pipeline_config = GraphicsPipeline::default_config();
+    pipeline_config.input_assembly.setTopology(vk::PrimitiveTopology::eTriangleStrip);
 
-    graphics_pipeline = std::make_unique<GraphicsPipeline>(
-        ctx,
-        graphics_pipeline_layout,
-        swap_chain->get_render_pass(),
+    pipeline = std::make_unique<GraphicsPipeline>(
+        renderer.ctx,
+        pipeline_layout,
+        renderer.swap_chain->get_render_pass(),
         0,
         "shaders/dist/shader.vert.spv",
         "shaders/dist/shader.frag.spv",
-        graphics_pipeline_config);
-
-    progress_bar = ProgressBar(ctx, *descriptor_pool, *swap_chain);
-
-    command_buffers.resize(swap_chain->image_count());
-    auto cmd = ctx.create_command_buffers(command_buffers.size());
-    for (std::size_t i = 0; i < command_buffers.size(); i++) {
-        command_buffers[i].first = false;
-        command_buffers[i].second = std::move(cmd[i]);
-    }
-
-    if (auto i = acquire_next_frame()) {
-        record_command_buffer(*i);
-        submit_frame(*i);
-    }
+        pipeline_config);
 }
 
-void App::create_swap_chain() {
-    auto extent = window.get_extent();
-    while (extent.width == 0 || extent.height == 0) {
-        extent = window.get_extent();
-        window.wait_events();
-    }
-    ctx.device->waitIdle();
-
-    std::unique_ptr<SwapChain> old_swap_chain = std::move(swap_chain);
-    swap_chain = std::make_unique<SwapChain>(ctx, extent, old_swap_chain.get());
-    if (
-        old_swap_chain &&
-        (!old_swap_chain->cmpeq_swap_formats(*swap_chain) ||
-         old_swap_chain->image_count() != swap_chain->image_count())) {
-        throw std::runtime_error("Swap chain has changed unexpectedly");
-    }
-    old_swap_chain = nullptr;
+void VideoTexture::update(AVFrame* frame, const mat2x2& transform, std::uint32_t i) {
+    update_ubo(transform, i);
+    update_image(frame, i);
+    prev_image_index = i;
 }
 
-void App::render(const FrameInfo& frame) {
-    window.poll_events();
-    if (frame.is_paused && !window.was_window_resized()) return;
-    if (auto i = acquire_next_frame()) {
-        update_global_ubo(*i, frame.transform);
-        progress_bar.update(frame.progress, *i);
-        draw(frame.video.frame, *i);
-        record_command_buffer(*i);
-        submit_frame(*i);
-        prev_image_index = *i;
-    }
+void VideoTexture::draw(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) {
+    pipeline->bind(cmd);
+    cmd->bindDescriptorSets(
+        vk::PipelineBindPoint::eGraphics,
+        *pipeline_layout,
+        0,
+        *descriptor_sets[i],
+        {});
+    cmd->draw(4, 1, 0, 0);
 }
 
-void App::update_global_ubo(std::size_t i, mat2x2 A) {
+void VideoTexture::update_ubo(const mat2x2& A, std::size_t i) {
     const float w = static_cast<float>(width);
     const float h = static_cast<float>(height);
-    const float W = static_cast<float>(swap_chain->width());
-    const float H = static_cast<float>(swap_chain->height());
+    const float W = static_cast<float>(renderer.swap_chain->width());
+    const float H = static_cast<float>(renderer.swap_chain->height());
 
     const float half_width = (w - 1) / 2;
     const float half_height = (h - 1) / 2;
@@ -259,8 +224,8 @@ void App::update_global_ubo(std::size_t i, mat2x2 A) {
     const float ymax = std::max(std::max(std::max(y1, y2), y3), y4);
     const float ymin = std::min(std::min(std::min(y1, y2), y3), y4);
 
-    const uint32_t box_width = static_cast<uint32_t>(xmax - xmin + 1);
-    const uint32_t box_height = static_cast<uint32_t>(ymax - ymin + 1);
+    const std::uint32_t box_width = static_cast<std::uint32_t>(xmax - xmin + 1);
+    const std::uint32_t box_height = static_cast<std::uint32_t>(ymax - ymin + 1);
 
     float scale_to_fit = std::min(W / box_width, H / box_height);
 
@@ -274,15 +239,15 @@ void App::update_global_ubo(std::size_t i, mat2x2 A) {
     norm[0][0] = 2.0f / W;
     norm[1][1] = 2.0f / H;
 
-    auto* v = static_cast<GlobalUBO*>(global_ubo[i]->get_mapped_memory());
+    auto* v = static_cast<UBO*>(ubo[i]->get_mapped_memory());
     v->transformation = norm * scale_to_fit * A * to_pixels_coord;
 }
 
-void App::draw(AVFrame* frame, std::uint32_t i) {
+void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
     if (frame == nullptr) {
         if (prev_image_index == std::numeric_limits<std::uint32_t>::max()) return;
         if (prev_image_index == i) return;
-        ctx.single_time_commands([this, i](vk::UniqueCommandBuffer& cmd) {
+        renderer.ctx.single_time_commands([this, i](vk::UniqueCommandBuffer& cmd) {
             for (std::size_t p = 0; p < 3; p++) {
                 if (is_image_transfer_supported) {
                     const auto& src = image_planes[prev_image_index][p];
@@ -337,77 +302,9 @@ void App::draw(AVFrame* frame, std::uint32_t i) {
                         width);
         }
     }
-    auto* v = static_cast<GlobalUBO*>(global_ubo[i]->get_mapped_memory());
+    auto* v = static_cast<UBO*>(ubo[i]->get_mapped_memory());
     v->is_color_range_jpeg = frame->color_range == AVCOL_RANGE_JPEG;
     v->is_color_space_bt709 = frame->colorspace == AVCOL_SPC_BT709;
-}
-
-std::optional<std::uint32_t> App::acquire_next_frame() {
-    std::uint32_t i;
-    vk::Result res = swap_chain->acquire_next_image(i);
-    if (res == vk::Result::eErrorOutOfDateKHR) {
-        create_swap_chain();
-        for (auto&& p : command_buffers) p.first = false;
-        return {};
-    }
-    if (res != vk::Result::eSuccess && res != vk::Result::eSuboptimalKHR) {
-        throw std::runtime_error("Can't acquire swap chain image. Vulkan Error code: " + std::to_string((int)res));
-    }
-    return i;
-}
-
-void App::submit_frame(std::uint32_t i) {
-    auto res = swap_chain->submit_command_buffer(command_buffers[i].second, i);
-    if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR || window.was_window_resized()) {
-        window.reset_window_resized_flag();
-        create_swap_chain();
-        for (auto&& p : command_buffers) p.first = false;
-    } else if (res != vk::Result::eSuccess) {
-        throw std::runtime_error("Can't present swap chain image. Vulkan Error code: " + std::to_string((int)res));
-    }
-}
-
-void App::record_command_buffer(std::uint32_t i) {
-    if (!command_buffers[i].first) {
-        auto& cmd = command_buffers[i].second;
-        cmd->begin(vk::CommandBufferBeginInfo());
-
-        vk::ClearValue clear_values[2];
-        clear_values[0].color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f);
-        clear_values[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);
-        cmd->beginRenderPass(
-            vk::RenderPassBeginInfo(
-                *swap_chain->get_render_pass(),
-                *swap_chain->get_frame_buffer(i),
-                vk::Rect2D({ 0, 0 }, swap_chain->get_swap_chain_extent()),
-                clear_values),
-            vk::SubpassContents::eInline);
-        auto extent = swap_chain->get_swap_chain_extent();
-        vk::Viewport viewport(
-            0.0f,
-            0.0f,
-            static_cast<float>(extent.width),
-            static_cast<float>(extent.height),
-            0.0f,
-            1.0f);
-        vk::Rect2D scissor = { { 0, 0 }, extent };
-        cmd->setViewport(0, viewport);
-        cmd->setScissor(0, scissor);
-
-        graphics_pipeline->bind(cmd);
-        cmd->bindDescriptorSets(
-            vk::PipelineBindPoint::eGraphics,
-            *graphics_pipeline_layout,
-            0,
-            *descriptor_sets[i],
-            {});
-        cmd->draw(4, 1, 0, 0);
-        progress_bar.draw(cmd, i);
-
-        cmd->endRenderPass();
-        cmd->end();
-        command_buffers[i].first = true;
-    }
 }
 
 }  // namespace aglea
