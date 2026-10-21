@@ -20,6 +20,7 @@ class Video {
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
     float cursor_x;
     float cursor_y;
+    std::int64_t static_cursor_us = 0;
     bool should_hide_progress_bar = false;
     float prev_progress = 0.f;
 
@@ -55,5 +56,7 @@ class Video {
     void get_cursor();
     void hide_cursor();
     void show_cursor();
+    void show_progress_bar();
+    void hide_progress_bar();
     float get_cursor_absdiff();
 };

@@ -36,7 +36,6 @@ void Video::play() {
     bool key_right_locked = false;
     bool key_left_locked = false;
     bool click_left_locked = false;
-    std::int64_t static_cursor_us = 0;
 
     while (render()) {
         if (window.should_close()) std::quick_exit(0);
@@ -77,6 +76,7 @@ void Video::play() {
                         std::int64_t(0),
                         duration_us);
                     seek(current_us);
+                    show_progress_bar();
                 }
                 key_right_locked = true;
             }
@@ -96,6 +96,7 @@ void Video::play() {
                         std::int64_t(0),
                         duration_us);
                     seek(current_us);
+                    show_progress_bar();
                 }
                 key_left_locked = true;
             }
@@ -111,13 +112,11 @@ void Video::play() {
                 static_cursor_us += frame_time_us;
                 if (static_cursor_us >= 2 * AV_TIME_BASE) {
                     hide_cursor();
-                    static_cursor_us = 0;
-                    should_hide_progress_bar = true;
+                    hide_progress_bar();
                 }
             } else {
                 show_cursor();
-                static_cursor_us = 0;
-                should_hide_progress_bar = false;
+                show_progress_bar();
             }
         }
 
@@ -209,4 +208,14 @@ float Video::get_cursor_absdiff() {
     float diff_x = prev_x - cursor_x;
     float diff_y = prev_y - cursor_y;
     return diff_x * diff_x + diff_y * diff_y;
+}
+
+void Video::show_progress_bar() {
+    static_cursor_us = 0;
+    should_hide_progress_bar = false;
+}
+
+void Video::hide_progress_bar() {
+    static_cursor_us = 0;
+    should_hide_progress_bar = true;
 }
