@@ -110,7 +110,7 @@ void Video::play() {
             float diff = get_cursor_absdiff();
             if (diff <= std::numeric_limits<float>::epsilon() * 2) {
                 static_cursor_us += frame_time_us;
-                if (static_cursor_us >= 2 * AV_TIME_BASE) {
+                if (static_cursor_us >= 3 * AV_TIME_BASE) {
                     hide_cursor();
                     hide_progress_bar();
                 }
