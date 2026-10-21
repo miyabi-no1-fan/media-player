@@ -30,7 +30,6 @@ static constexpr char USAGE[] =
     "    --rotate [a]                   Rotate the video by [a] degrees counter-clockwise\n"
     "    --flip horizontally | h        Flip the video horizontally\n"
     "           vertically   | v        Flip the video vertically\n"
-    "    --skip, -s [t]                 Skip the first [t] seconds of the media\n"
     "    --no-video                     Don't play video\n"
     "    --no-audio                     Don't play audio\n"
     "    --no-window                    Don't open window, this also mean no video\n";
@@ -38,7 +37,6 @@ static constexpr char USAGE[] =
 struct Info {
     std::string path;
     int loop = 1;
-    int skip = 0;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
     bool no_video = false;
     bool no_audio = false;
@@ -58,8 +56,7 @@ int main(int argc, const char* argv[]) try {
         Packet::init_channels();
         Frame::init_channels();
 
-        Decoder decoder(info.path.c_str(), info.skip);
-        info.skip = 0;
+        Decoder decoder(info.path.c_str());
         if (info.no_video ||
             info.no_window) decoder.no_video();
         if (info.no_audio) decoder.no_audio();
@@ -167,19 +164,6 @@ Info parse(int argc, const char* argv[]) {
                     } * info.transformation;
                 } else {
                     throw std::invalid_argument("Unknown argument for --flip");
-                }
-            }
-
-            else if (arg == "--skip" || arg == "-s") {
-                i++;
-                std::istringstream iss(argv[i]);
-                iss >> info.skip;
-                if (!iss || !iss.eof()) {
-                    throw std::invalid_argument("Unknown argument for --skip");
-                }
-                if (info.skip < 0) {
-                    std::cout << "Warning: `--skip` expect a positive integer, found "
-                              << info.skip << "\n";
                 }
             }
 

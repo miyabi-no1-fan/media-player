@@ -112,15 +112,12 @@ class Decoder {
     std::optional<AudioStream> audio = std::nullopt;
 
    public:
-    Decoder(const char* path, int skip = 0) {
+    Decoder(const char* path) {
         if (avformat_open_input(&ictx, path, nullptr, nullptr) < 0 ||
             avformat_find_stream_info(ictx, nullptr) < 0) {
             avformat_close_input(&ictx);
             throw std::runtime_error("Cannot read input file: " + std::string(path));
         }
-
-        std::int64_t ts = static_cast<std::int64_t>(skip) * AV_TIME_BASE;
-        if (ts > 0) avformat_seek_file(ictx, -1, ts, ts, ts, 0);
 
         if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video.emplace(std::move(*strm));
         if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio.emplace(std::move(*strm));
