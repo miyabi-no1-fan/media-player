@@ -49,7 +49,7 @@ class Decoder {
         AVFilterGraph* graph = nullptr;
         AVFilterContext* buffersrc_ctx = nullptr;
         AVFilterContext* buffersink_ctx = nullptr;
-        operator bool() { return graph && buffersrc_ctx && buffersink_ctx; }
+        operator bool() { return graph; }
         Filter() {}
         ~Filter() {
             avfilter_graph_free(&graph);
@@ -58,8 +58,19 @@ class Decoder {
         }
         Filter(const Filter&) = delete;
         Filter& operator=(const Filter&) = delete;
-        Filter(Filter&&) = default;
-        Filter& operator=(Filter&&) = default;
+        Filter(Filter&& o) noexcept
+            : graph(std::exchange(o.graph, nullptr)),
+              buffersrc_ctx(std::exchange(o.buffersrc_ctx, nullptr)),
+              buffersink_ctx(std::exchange(o.buffersink_ctx, nullptr)) {}
+        Filter& operator=(Filter&& o) noexcept {
+            if (this != &o) {
+                avfilter_graph_free(&graph);
+                graph = std::exchange(o.graph, nullptr);
+                buffersrc_ctx = std::exchange(o.buffersrc_ctx, nullptr);
+                buffersink_ctx = std::exchange(o.buffersink_ctx, nullptr);
+            }
+            return *this;
+        }
     } filter;
 
     struct Stream {
