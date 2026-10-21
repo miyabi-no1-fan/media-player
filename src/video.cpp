@@ -9,11 +9,11 @@
 #include <limits>
 #include <memory>
 #include <thread>
-#include <utility>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 extern "C" {
 #include <libavutil/avutil.h>
+#include <libavutil/mathematics.h>
 }
 
 #include "matrix.hpp"
@@ -28,6 +28,8 @@ extern std::atomic_bool seek_available;
 extern std::atomic_bool seek_req;
 extern std::atomic_int64_t seek_time_us;
 std::atomic_bool video_idle = false;
+
+extern std::atomic_int64_t audio_current_us;
 
 void Video::play() {
     GLFWwindow* w = window.get_window();
@@ -71,11 +73,11 @@ void Video::play() {
 
             if (key_right == GLFW_PRESS) {
                 if (!key_right_locked && seek_available.load()) {
-                    current_us = std::clamp(
-                        current_us + 3 * AV_TIME_BASE,
+                    auto target_us = std::clamp(
+                        audio_current_us.load() + 3 * AV_TIME_BASE,
                         std::int64_t(0),
                         duration_us);
-                    seek(current_us);
+                    seek(target_us);
                     show_progress_bar();
                 }
                 key_right_locked = true;
@@ -91,11 +93,11 @@ void Video::play() {
 
             if (key_left == GLFW_PRESS) {
                 if (!key_left_locked && seek_available.load()) {
-                    current_us = std::clamp(
-                        current_us - 3 * AV_TIME_BASE,
+                    auto target_us = std::clamp(
+                        audio_current_us.load() - 3 * AV_TIME_BASE,
                         std::int64_t(0),
                         duration_us);
-                    seek(current_us);
+                    seek(target_us);
                     show_progress_bar();
                 }
                 key_left_locked = true;
@@ -119,9 +121,6 @@ void Video::play() {
                 show_progress_bar();
             }
         }
-
-        if (!paused.load())
-            current_us += frame_time_us;
     }
 }
 
@@ -135,24 +134,50 @@ void Video::seek(std::int64_t target_us) {
 }
 
 bool Video::render() {
-    float progress =
-        (should_hide_progress_bar)
-            ? 0.f
-            : static_cast<float>(current_us) / static_cast<float>(duration_us);
+    window.poll_events();
 
     Decoder::Frame decoded = {};
     if (!paused.load()) {
-        auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
-        if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
-        if (res) decoded = std::move(*res);
+        while (1) {
+            auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
+            if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
+            if (res) {
+                std::int64_t pts = av_rescale_q(res->frame->best_effort_timestamp, res->frame->time_base, AV_TIME_BASE_Q);
+                if (!pts_offset) pts_offset = pts;
+                else pts -= *pts_offset;
+
+                std::int64_t target = audio_current_us.load();
+
+                if (pts < target - frame_time_us) {
+                    // underrun
+                    continue;
+                } else if (pts > target + frame_time_us) {
+                    // overrun
+                    while (pts > target + frame_time_us) {
+                        std::this_thread::sleep_for(std::chrono::microseconds(100));
+                        target = audio_current_us.load();
+                    }
+                    decoded = std::move(*res);
+                    break;
+                } else {
+                    decoded = std::move(*res);
+                    break;
+                }
+            }
+        }
     }
 
-    window.poll_events();
+    float progress =
+        (should_hide_progress_bar)
+            ? 0.f
+            : static_cast<float>(audio_current_us.load()) / static_cast<float>(duration_us);
 
     if (decoded.frame == nullptr &&
         !window.was_window_resized() &&
         progress == prev_progress)
         return true;
+
+    prev_progress = progress;
 
     if (auto i = renderer.acquire_next_frame()) {
         tx_video->update(decoded.frame, transformation, *i);
@@ -161,7 +186,6 @@ bool Video::render() {
         renderer.submit_frame(*i);
     }
 
-    prev_progress = progress;
     return true;
 }
 

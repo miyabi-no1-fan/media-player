@@ -4,6 +4,7 @@
 extern "C" {
 #include <libavutil/avutil.h>
 }
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -20,7 +21,9 @@ extern "C" {
 
 extern std::atomic_bool paused;
 extern std::atomic_bool seek_req;
+extern std::atomic_int64_t seek_time_us;
 std::atomic_bool audio_idle = false;
+std::atomic_int64_t audio_current_us = 0;
 
 template <typename T>
 int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
@@ -38,6 +41,8 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         return 0;
     }
 
+    audio_current_us.fetch_add(sample_time_us);
+
     while (self.queue<T>().size() < needed) {
         auto res = Frame::Audio::receiver.receive_timeout(std::chrono::microseconds(sample_time_us) * 0.8);
         if (!res) break;
@@ -53,6 +58,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
 
         if (seek_req.load()) {
             self.queue<T>().clear();
+            audio_current_us.store(seek_time_us.load());
             audio_idle.store(true);
             while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
             audio_idle.store(false);
@@ -64,7 +70,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     if (n < needed) std::memset(buffer + n, 0, (needed - n) * sizeof(T));
     self.queue<T>().erase(self.queue<T>().begin(), self.queue<T>().begin() + n);
 
-    self.current_us += sample_time_us;
     return 0;
 }
 
@@ -77,8 +82,9 @@ Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat samp
           #endif
       }),
       channels(channels),
-      sample_rate(sample_rate),
-      current_us(0) {
+      sample_rate(sample_rate) {
+    audio_current_us.store(0);
+
     RtAudio::StreamParameters parameters;
     parameters.deviceId = dac.getDefaultOutputDevice();
     parameters.nChannels = channels;

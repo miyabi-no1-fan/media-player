@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "matrix.hpp"
@@ -16,7 +17,7 @@ class Video {
     std::size_t bpp = 3;
     std::int64_t frame_time_us;
     std::int64_t duration_us;
-    std::int64_t current_us = 0;
+    std::optional<std::int64_t> pts_offset;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
     float cursor_x;
     float cursor_y;

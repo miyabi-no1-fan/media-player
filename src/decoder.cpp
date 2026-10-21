@@ -55,7 +55,7 @@ std::thread Decoder::launch() {
             while (video || audio) {
                 if (seek_req.load()) {
                     std::int64_t ts = seek_time_us.load();
-                    avformat_seek_file(ictx, -1, ts - AV_TIME_BASE, ts, ts + AV_TIME_BASE, 0);
+                    avformat_seek_file(ictx, -1, ts, ts, ts, 0);
                     while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
                     while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
                     while (::Frame::Video::receiver.try_receive());
@@ -156,10 +156,8 @@ std::thread Decoder::launch_audio_decoder() {
                         auto res = resample_audio(f.frame);
                         if (!res) throw res.error();
                         av_frame_unref(f.frame);
-                        res->frame->time_base = ictx->streams[video->stream_index]->time_base;
                         ::Frame::Audio::sender.send(std::move(*res));
                     } else {
-                        f.frame->time_base = ictx->streams[video->stream_index]->time_base;
                         ::Frame::Audio::sender.send(std::move(f));
                         f = av_frame_alloc();
                     }
@@ -195,7 +193,6 @@ std::thread Decoder::launch_audio_decoder() {
 
 std::expected<Decoder::Frame, int> Decoder::resample_audio(const AVFrame* input) {
     Frame out = av_frame_alloc();
-    av_frame_copy_props(out.frame, input);
     int64_t sample_rate;
     av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
     out.frame->sample_rate = static_cast<int>(sample_rate);

@@ -9,7 +9,6 @@ class Audio {
     RtAudio dac;
     unsigned int channels;
     unsigned int sample_rate;
-    std::int64_t current_us;
 
     std::variant<
         std::vector<float>,
