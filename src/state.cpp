@@ -4,6 +4,27 @@
 #include "ringbuf.hpp"
 #include "spsc.hpp"
 
+std::atomic_int64_t audio_current_us = 0;
+
+std::atomic_bool audio_idle = false;
+std::atomic_bool video_idle = false;
+
+std::atomic_bool paused = false;
+
+std::atomic_bool seek_available = true;
+std::atomic_bool seek_req = false;
+std::atomic_int64_t seek_time_us = 0;
+
+void clear_state() {
+    audio_current_us.store(0);
+    audio_idle.store(false);
+    video_idle.store(false);
+    paused.store(false);
+    seek_available.store(false);
+    seek_req.store(false);
+    seek_time_us.store(0);
+}
+
 namespace Packet {
 namespace Video {
 SPSC::Sender<Decoder::Packet> sender;

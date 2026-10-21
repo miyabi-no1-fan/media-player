@@ -26,19 +26,11 @@ extern "C" {
 static std::atomic_int video_decoder_status = 0;
 static std::atomic_int audio_decoder_status = 0;
 
-std::atomic_bool seek_available = true;
-std::atomic_bool seek_req = false;
-std::atomic_int64_t seek_time_us = 0;
-
-extern std::atomic_bool audio_idle;
-extern std::atomic_bool video_idle;
-
 std::thread Decoder::launch() {
     return std::thread([this]() mutable {
         video_decoder_status.store(0);
         audio_decoder_status.store(0);
         seek_available.store(true);
-        seek_req.store(false);
 
         std::thread video_thrd, audio_thrd;
         if (video) video_thrd = launch_video_decoder();

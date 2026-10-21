@@ -23,14 +23,6 @@ extern "C" {
 #include "textures/progress_bar.hpp"
 #include "textures/video_texture.hpp"
 
-std::atomic_bool paused = false;
-extern std::atomic_bool seek_available;
-extern std::atomic_bool seek_req;
-extern std::atomic_int64_t seek_time_us;
-std::atomic_bool video_idle = false;
-
-extern std::atomic_int64_t audio_current_us;
-
 void Video::play() {
     GLFWwindow* w = window.get_window();
 

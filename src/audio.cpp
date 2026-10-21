@@ -19,12 +19,6 @@ extern "C" {
 
 #include "state.hpp"
 
-extern std::atomic_bool paused;
-extern std::atomic_bool seek_req;
-extern std::atomic_int64_t seek_time_us;
-std::atomic_bool audio_idle = false;
-std::atomic_int64_t audio_current_us = 0;
-
 template <typename T>
 int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
                     double, RtAudioStreamStatus, void* user_data) {
@@ -83,8 +77,6 @@ Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat samp
       }),
       channels(channels),
       sample_rate(sample_rate) {
-    audio_current_us.store(0);
-
     RtAudio::StreamParameters parameters;
     parameters.deviceId = dac.getDefaultOutputDevice();
     parameters.nChannels = channels;
