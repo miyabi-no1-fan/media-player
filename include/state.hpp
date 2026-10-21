@@ -68,12 +68,12 @@ void init_channels();
 
 namespace Frame {
 namespace Video {
-static constexpr int CONCURRENT_LIMIT = 15;
+static constexpr int CONCURRENT_LIMIT = 10;
 extern RingBuf::Sender<Decoder::Frame> sender;
 extern RingBuf::Receiver<Decoder::Frame> receiver;
 }  // namespace Video
 namespace Audio {
-static constexpr int CONCURRENT_LIMIT = 15;
+static constexpr int CONCURRENT_LIMIT = 10;
 extern RingBuf::Sender<Decoder::Frame> sender;
 extern RingBuf::Receiver<Decoder::Frame> receiver;
 }  // namespace Audio
