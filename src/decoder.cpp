@@ -115,8 +115,10 @@ std::thread Decoder::launch_video_decoder() {
                         int res = sws_scale_frame(video->sws, out.frame, f.frame);
                         if (res < 0) throw res;
                         av_frame_unref(f.frame);
+                        out.frame->time_base = ictx->streams[video->stream_index]->time_base;
                         ::Frame::Video::sender.send(std::move(out));
                     } else {
+                        f.frame->time_base = ictx->streams[video->stream_index]->time_base;
                         ::Frame::Video::sender.send(std::move(f));
                         f.frame = av_frame_alloc();
                     }
@@ -154,8 +156,10 @@ std::thread Decoder::launch_audio_decoder() {
                         auto res = resample_audio(f.frame);
                         if (!res) throw res.error();
                         av_frame_unref(f.frame);
+                        res->frame->time_base = ictx->streams[video->stream_index]->time_base;
                         ::Frame::Audio::sender.send(std::move(*res));
                     } else {
+                        f.frame->time_base = ictx->streams[video->stream_index]->time_base;
                         ::Frame::Audio::sender.send(std::move(f));
                         f = av_frame_alloc();
                     }
