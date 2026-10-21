@@ -140,7 +140,7 @@ bool Video::render() {
             ? 0.f
             : static_cast<float>(current_us) / static_cast<float>(duration_us);
 
-    Decoder::Frame decoded = nullptr;
+    Decoder::Frame decoded = {};
     if (!paused.load()) {
         auto res = Frame::Video::receiver.receive_timeout(std::chrono::microseconds(frame_time_us) * 0.8);
         if (!res && res.error() == RingBuf::Error::EndOfInput) return false;
