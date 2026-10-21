@@ -57,7 +57,13 @@ class Decoder {
         Filter() {}
         ~Filter() {
             avfilter_graph_free(&graph);
+            buffersrc_ctx = nullptr;
+            buffersink_ctx = nullptr;
         }
+        Filter(const Filter&) = delete;
+        Filter& operator=(const Filter&) = delete;
+        Filter(Filter&&) = default;
+        Filter& operator=(Filter&&) = default;
     } filter;
 
     struct Stream {
