@@ -48,7 +48,7 @@ std::thread Decoder::launch() {
                 if (seek_req.load()) {
                     std::int64_t ts = seek_time_us.load();
                     avformat_seek_file(ictx, -1, ts, ts, ts, 0);
-                    while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    // while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
                     while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
                     while (::Frame::Video::receiver.try_receive());
                     while (::Frame::Audio::receiver.try_receive());

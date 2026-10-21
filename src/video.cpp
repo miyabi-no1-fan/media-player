@@ -119,8 +119,8 @@ void Video::play() {
 void Video::seek(std::int64_t target_us) {
     paused.store(false);
     seek_time_us.store(target_us);
-    seek_req.store(true);
     video_idle.store(true);
+    seek_req.store(true);
     while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
     video_idle.store(false);
 }
