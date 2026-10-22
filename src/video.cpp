@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -118,12 +119,19 @@ void Video::play() {
 }
 
 void Video::seek(std::int64_t target_us) {
+    #ifndef NDEBUG
+    using namespace std::chrono;
+    auto _db_time_start = steady_clock::now();
+    #endif
     paused.store(false);
     seek_time_us.store(target_us);
     video_idle.store(true);
     seek_req.store(true);
     while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
     video_idle.store(false);
+    #ifndef NDEBUG
+    std::cout << "Seek request time: " << duration_cast<milliseconds>(steady_clock::now() - _db_time_start) << std::endl;
+    #endif
 }
 
 bool Video::render() {
@@ -196,6 +204,9 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       transformation(transformation),
       window(width, height, name, 1.0 / fps),
       renderer(window) {
+    #ifndef NDEBUG
+    std::cout << "Video display: " << width << "x" << height << "@" << fps << std::endl;
+    #endif
     has_video = true;
     tx_video = std::make_unique<aglea::VideoTexture>(renderer, width, height);
     tx_progress = std::make_unique<aglea::ProgressBar>(renderer);

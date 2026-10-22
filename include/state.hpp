@@ -26,9 +26,6 @@ extern std::atomic_int64_t audio_current_us;
 //
 // Our main decoder thread will handle the seek.
 // `seek_req` is back to false when done.
-//
-// This process usually does not cause stuttering.
-// The synchronization part after this does.
 
 // Synchronization: read `video.cpp` at `Video::render`
 
