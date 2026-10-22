@@ -292,8 +292,10 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
     if (index < 0 || codec == nullptr)
         return std::nullopt;
     AVCodecContext* decoder = avcodec_alloc_context3(codec);
-    decoder->thread_count = 0;
-    decoder->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    if (type == AVMEDIA_TYPE_VIDEO) {
+        decoder->thread_count = 4;
+        decoder->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    }
     if (avcodec_parameters_to_context(decoder, ictx->streams[index]->codecpar) < 0 ||
         avcodec_open2(decoder, codec, nullptr) < 0) {
         avcodec_free_context(&decoder);
