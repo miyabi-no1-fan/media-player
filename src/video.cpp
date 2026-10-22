@@ -61,7 +61,7 @@ void Video::play() {
             }
         }
 
-        if (!key_left_locked && !audio_seek_req.load()) {
+        if (!key_left_locked && seek_req_ok.load()) {
             int key_right = glfwGetKey(w, GLFW_KEY_RIGHT);
 
             if (key_right == GLFW_PRESS) {
@@ -81,7 +81,7 @@ void Video::play() {
             }
         }
 
-        if (!key_right_locked && !audio_seek_req.load()) {
+        if (!key_right_locked && seek_req_ok.load()) {
             int key_left = glfwGetKey(w, GLFW_KEY_LEFT);
 
             if (key_left == GLFW_PRESS) {
@@ -119,19 +119,16 @@ void Video::play() {
 
 void Video::seek(std::int64_t target_us) {
     paused.store(false);
-    seek_time_us.store(target_us);
-    decoder_seek_req.store(true);  // order matter
     audio_current_us = nullptr;
+    seek_time_us.store(target_us);
+    decoder_seek_req.store(true);
     audio_seek_req.store(true);
-    // wait for unfinished seek request to finish
-    // moved to `Video::render`
+    audio_seek_req.wait(true);
+    seek_req_ok.store(false);
 }
 
 bool Video::render() {
     window.poll_events();
-
-    // wait for unfinished seek request to finish
-    audio_seek_req.wait(true);
 
     Decoder::Frame decoded = {};
     if (!paused.load() && has_video) {
@@ -162,6 +159,9 @@ bool Video::render() {
             }
         }
     }
+
+    // video frame is ready, so we clear this flag
+    seek_req_ok.store(true);
 
     if (!has_video) {
         // We skipped receive because of no video,

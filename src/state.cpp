@@ -13,6 +13,7 @@ std::atomic_bool seek_available = false;
 std::atomic_bool decoder_seek_req = false;
 std::atomic_bool audio_seek_req = false;
 std::atomic_int64_t seek_time_us = 0;
+std::atomic_bool seek_req_ok = false;
 
 void new_state() {
     audio_current_us = std::make_shared<std::atomic_int64_t>(0);
@@ -21,6 +22,7 @@ void new_state() {
     decoder_seek_req.store(false);
     audio_seek_req.store(false);
     seek_time_us.store(0);
+    seek_req_ok.store(true);
     Packet::new_channels();
     Frame::new_channels();
 }

@@ -25,6 +25,13 @@ extern std::shared_ptr<std::atomic_int64_t> audio_current_us;
 // if `audio_seek_req == false`, `audio_current_us` must not be nullptr.
 // if `decoder_seek_req == false`, current shared channels must not be nullptr.
 // if `audio_seek_req == false`, `decoder_seek_req` = true.
+// if `seek_req_ok == true`, `audio_seek_req` = false.
+
+// So a seek chain is
+// `seek_req_ok`, set false by video
+// `decoder_seek_req`, set true by video, audio wait for false.
+// `audio_seek_req`, set true by video, video wait for false.
+// `seek_req_ok`, audio wait for true.
 
 // atomic ordering are `seq_cst`
 
@@ -40,19 +47,27 @@ extern std::atomic_bool paused;
 // `decoder_seek_req` when this is false
 extern std::atomic_bool seek_available;
 
-// set true by video thread
-// set false by main decode thread
+// `decoder_seek_req` is set to true by video and
+// set to false when decoder finish its seek request.
+// must set before `audio_seek_req`.
 extern std::atomic_bool decoder_seek_req;
 
-// set true by video thread
-// set false by audio thread
-// required `decoder_seek_req` to be set
-// before this.
+// `audio_seek_req` is set to true by video and
+// set to false when audio finish its seek request.
+// must set after `decoder_seek_req`.
 extern std::atomic_bool audio_seek_req;
 
 // set by video thread
-// must set before `*_seek_req` with `seq_cst` ordering
+// must set before `*_seek_req`.
 extern std::atomic_int64_t seek_time_us;
+
+// `seek_req_ok` is set to true by video
+// and set to false by video.
+// After decoder and audio finish their seek req
+// audio has to wait until video frames ready to play.
+// Video decoder can be slow and might miss a few frames
+// to catch up.
+extern std::atomic_bool seek_req_ok;
 
 void new_state();
 
