@@ -10,7 +10,7 @@
 
 namespace SPSC {
 
-static constexpr std::chrono::microseconds POLLING_INTERVAL = std::chrono::microseconds(50);
+static constexpr std::chrono::microseconds POLLING_INTERVAL = std::chrono::microseconds(100);
 
 template <typename T>
 class Container {
