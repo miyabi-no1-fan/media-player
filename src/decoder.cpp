@@ -74,13 +74,7 @@ std::thread Decoder::launch() {
                 if (decoder_seek_req.load()) {
                     // seek frame
                     std::int64_t ts = seek_time_us.load();
-                    int stream_index = -1;
-                    if (audio) stream_index = audio->stream_index;
-                    else if (video) stream_index = video->stream_index;
-                    av_seek_frame(ictx,
-                                  stream_index,
-                                  av_rescale_q(ts, AV_TIME_BASE_Q, ictx->streams[stream_index]->time_base),
-                                  AVSEEK_FLAG_BACKWARD);
+                    avformat_seek_file(ictx, -1, 0, ts, ts, 0);
 
                     // tell sub-decode threads to quit -- this is flush
                     sub_decoders_should_quit->store(true);
