@@ -4,6 +4,9 @@
 #include <memory>
 #include <optional>
 #include <string>
+extern "C" {
+#include <libavutil/avutil.h>
+}
 
 #include "matrix.hpp"
 #include "renderer.hpp"
@@ -12,12 +15,12 @@
 #include "window.hpp"
 
 class Video {
-    std::size_t width;
-    std::size_t height;
+    std::size_t width = 1;
+    std::size_t height = 1;
     std::size_t bpp = 3;
-    std::int64_t frame_time_us;
+    std::int64_t frame_time_us = static_cast<std::int64_t>(AV_TIME_BASE / 60.f);
     std::int64_t duration_us;
-    std::optional<std::int64_t> pts_offset;
+    std::optional<std::int64_t> pts_offset = std::nullopt;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
     float cursor_x;
     float cursor_y;
@@ -27,8 +30,8 @@ class Video {
 
     aglea::Window window;
     aglea::Renderer renderer;
-    std::unique_ptr<aglea::VideoTexture> tx_video;
-    std::unique_ptr<aglea::ProgressBar> tx_progress;
+    std::unique_ptr<aglea::VideoTexture> tx_video = nullptr;
+    std::unique_ptr<aglea::ProgressBar> tx_progress = nullptr;
 
    public:
     Video(std::uint32_t width,
