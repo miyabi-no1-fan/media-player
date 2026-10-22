@@ -77,10 +77,14 @@ std::thread Decoder::launch() {
 
                     // while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
                     while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    while (::Frame::Video::receiver.try_receive());
-                    while (::Frame::Audio::receiver.try_receive());
-                    if (video_thrd.joinable()) video_thrd.join();
-                    if (audio_thrd.joinable()) audio_thrd.join();
+                    if (video_thrd.joinable()) {
+                        while (::Frame::Video::receiver.try_receive());
+                        video_thrd.join();
+                    }
+                    if (audio_thrd.joinable()) {
+                        while (::Frame::Audio::receiver.try_receive());
+                        audio_thrd.join();
+                    }
                     if (video) avcodec_flush_buffers(video->decoder);
                     if (audio) avcodec_flush_buffers(audio->decoder);
                     if (video) init_filters();
@@ -91,6 +95,7 @@ std::thread Decoder::launch() {
                     if (audio) audio_thrd = launch_audio_decoder();
                     audio_current_us.store(ts);
                     seek_req.store(false);
+                    break;
                 }
 
                 if (video_decoder_status.load(std::memory_order::relaxed) < 0)
