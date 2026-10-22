@@ -73,13 +73,19 @@ int main(int argc, const char* argv[]) try {
         }
 
         if (!info.no_window && video == nullptr) {
-            video = std::make_unique<Video>(
-                static_cast<std::uint32_t>(decoder.output_width().value_or(1)),
-                static_cast<std::uint32_t>(decoder.output_height().value_or(1)),
-                std::round(decoder.fps().value_or(60)),
-                decoder.duration_us(),
-                "media-player: " + info.path,
-                info.transformation);
+            if (decoder.has_video()) {
+                video = std::make_unique<Video>(
+                    static_cast<std::uint32_t>(*decoder.output_width()),
+                    static_cast<std::uint32_t>(*decoder.output_height()),
+                    std::round(*decoder.fps()),
+                    decoder.duration_us(),
+                    "media-player: " + info.path,
+                    info.transformation);
+            } else {
+                video = std::make_unique<Video>(
+                    decoder.duration_us(),
+                    "media-player: " + info.path);
+            }
         }
 
         if (audio) audio->play();

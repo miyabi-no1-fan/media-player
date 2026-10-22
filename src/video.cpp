@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <expected>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -129,7 +130,7 @@ bool Video::render() {
     window.poll_events();
 
     Decoder::Frame decoded = {};
-    if (!paused.load()) {
+    if (!paused.load() && has_video) {
         while (1) {
             auto res = Frame::Video::receiver.receive();
             if (!res) return false;
@@ -158,6 +159,13 @@ bool Video::render() {
         }
     }
 
+    if (!has_video) {
+        // We skipped receive because of no video,
+        // so we won't receive any EndOfInput signal from decoder.
+        // This is the fallback
+        if (audio_current_us.load() >= duration_us) return false;
+    }
+
     float progress =
         (should_hide_progress_bar)
             ? 0.f
@@ -171,8 +179,8 @@ bool Video::render() {
     prev_progress = progress;
 
     if (auto i = renderer.acquire_next_frame()) {
-        tx_video->update(decoded.frame, transformation, *i);
-        tx_progress->update(progress, *i);
+        if (tx_video) tx_video->update(decoded.frame, transformation, *i);
+        if (tx_progress) tx_progress->update(progress, *i);
         renderer.record_command_buffer(*i);
         renderer.submit_frame(*i);
     }
@@ -188,11 +196,22 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       transformation(transformation),
       window(width, height, name, 1.0 / fps),
       renderer(window) {
+    has_video = true;
     tx_video = std::make_unique<aglea::VideoTexture>(renderer, width, height);
     tx_progress = std::make_unique<aglea::ProgressBar>(renderer);
     tx_video->init();
     tx_progress->init();
     renderer.textures.push_back(static_cast<aglea::Texture*>(tx_video.get()));
+    renderer.textures.push_back(static_cast<aglea::Texture*>(tx_progress.get()));
+    renderer.invalidate_command_buffers();
+}
+
+Video::Video(std::int64_t duration_us, const std::string& name)
+    : duration_us(duration_us),
+      window(1, 1, name, 1.0 / 60),
+      renderer(window) {
+    tx_progress = std::make_unique<aglea::ProgressBar>(renderer);
+    tx_progress->init();
     renderer.textures.push_back(static_cast<aglea::Texture*>(tx_progress.get()));
     renderer.invalidate_command_buffers();
 }

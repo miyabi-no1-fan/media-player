@@ -27,6 +27,7 @@ class Video {
     std::int64_t static_cursor_us = 0;
     bool should_hide_progress_bar = false;
     float prev_progress = 0.f;
+    bool has_video = false;
 
     aglea::Window window;
     aglea::Renderer renderer;
@@ -40,6 +41,7 @@ class Video {
           std::int64_t duration_us,
           const std::string& name,
           aglea::mat2x2 transformation = aglea::mat2x2::identity());
+    Video(std::int64_t duration_us, const std::string& name);
     ~Video();
 
     Video(const Video&) = delete;
