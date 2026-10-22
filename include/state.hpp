@@ -28,6 +28,10 @@ extern std::shared_ptr<std::atomic_int64_t> audio_current_us;
 
 // atomic ordering are `seq_cst`
 
+// NOTE: `deocder_seek_req` and `audio_seek_req` only
+// call `notify_one` after being set to false
+// because currently, only 1 thread call `wait`
+
 // set by video thread
 extern std::atomic_bool paused;
 

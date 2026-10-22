@@ -49,7 +49,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
             self.current_us->store(seek_time_us.load());
             // seek done
             audio_seek_req.store(false);
-            audio_seek_req.notify_all();
+            audio_seek_req.notify_one();
             continue;
         }
 
