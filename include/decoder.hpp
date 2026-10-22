@@ -39,6 +39,7 @@ inline RtAudioFormat rt_audio_format(const AVSampleFormat& format) {
     return supported_audio_formats.find(format)->second;
 }
 
+// output pixels format for the FFmpeg filter
 static constexpr const char* pixel_format = "yuv420p";
 
 class Decoder {
@@ -182,12 +183,12 @@ class Decoder {
     bool has_audio() const { return audio.has_value(); }
 
     // for video
-    std::optional<int> input_width() const {
+    std::optional<int> width() const {
         if (!video) return std::nullopt;
         return video->decoder->width;
     }
 
-    std::optional<int> input_height() const {
+    std::optional<int> height() const {
         if (!video) return std::nullopt;
         return video->decoder->height;
     }
@@ -197,19 +198,10 @@ class Decoder {
         return video->decoder->pix_fmt;
     }
 
-    std::optional<int> output_width() const {
-        if (!video) return std::nullopt;
-        return video->decoder->width;
-    }
-
-    std::optional<int> output_height() const {
-        if (!video) return std::nullopt;
-        return video->decoder->height;
-    }
-
     std::optional<AVPixelFormat> output_pixel_format() const {
         if (!video) return std::nullopt;
-        return video->decoder->pix_fmt;
+        static_assert(std::string_view(pixel_format) == "yuv420p");
+        return AV_PIX_FMT_YUV420P;
     }
 
     std::optional<double> fps() const {
@@ -222,7 +214,7 @@ class Decoder {
     }
 
     // for audio
-    std::optional<int> input_channels() const {
+    std::optional<int> input_audio_channels() const {
         if (audio) return audio->decoder->ch_layout.nb_channels;
         return std::nullopt;
     }
@@ -237,7 +229,7 @@ class Decoder {
         return std::nullopt;
     }
 
-    std::optional<int> output_channels() const {
+    std::optional<int> output_audio_channels() const {
         if (!audio) return std::nullopt;
         if (audio->swr) {
             AVChannelLayout channel_layout;

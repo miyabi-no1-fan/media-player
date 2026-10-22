@@ -67,7 +67,7 @@ int main(int argc, const char* argv[]) try {
 
         if (decoder.has_audio()) {
             audio = std::make_unique<Audio>(
-                *decoder.output_channels(),
+                *decoder.output_audio_channels(),
                 *decoder.output_sample_rate(),
                 rt_audio_format(*decoder.output_sample_format()));
         }
@@ -75,8 +75,8 @@ int main(int argc, const char* argv[]) try {
         if (!info.no_window && video == nullptr) {
             if (decoder.has_video()) {
                 video = std::make_unique<Video>(
-                    static_cast<std::uint32_t>(*decoder.output_width()),
-                    static_cast<std::uint32_t>(*decoder.output_height()),
+                    static_cast<std::uint32_t>(*decoder.width()),
+                    static_cast<std::uint32_t>(*decoder.height()),
                     std::round(*decoder.fps()),
                     decoder.duration_us(),
                     "media-player: " + info.path,
