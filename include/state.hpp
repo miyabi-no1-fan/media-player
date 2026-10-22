@@ -24,6 +24,9 @@ extern std::shared_ptr<std::atomic_int64_t> audio_current_us;
 
 // if `audio_seek_req == false`, `audio_current_us` must not be nullptr.
 // if `decoder_seek_req == false`, current shared channels must not be nullptr.
+// if `audio_seek_req == false`, `decoder_seek_req` = true.
+
+// atomic ordering are `seq_cst`
 
 // set by video thread
 extern std::atomic_bool paused;

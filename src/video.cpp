@@ -61,7 +61,7 @@ void Video::play() {
             }
         }
 
-        if (!key_left_locked && audio_current_us) {
+        if (!key_left_locked && !audio_seek_req.load()) {
             int key_right = glfwGetKey(w, GLFW_KEY_RIGHT);
 
             if (key_right == GLFW_PRESS) {
@@ -81,7 +81,7 @@ void Video::play() {
             }
         }
 
-        if (!key_right_locked && audio_current_us) {
+        if (!key_right_locked && !audio_seek_req.load()) {
             int key_left = glfwGetKey(w, GLFW_KEY_LEFT);
 
             if (key_left == GLFW_PRESS) {
@@ -132,7 +132,6 @@ bool Video::render() {
 
     // wait for unfinished seek request to finish
     audio_seek_req.wait(true);
-    decoder_seek_req.wait(true);
 
     Decoder::Frame decoded = {};
     if (!paused.load() && has_video) {
