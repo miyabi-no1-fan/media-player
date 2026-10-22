@@ -43,12 +43,26 @@ std::thread Decoder::launch() {
         if (audio) audio_thrd = launch_audio_decoder();
 
         Packet p = av_packet_alloc();
-        while ((video || audio) && av_read_frame(ictx, p.packet) >= 0) {
-            if (video && p.packet->stream_index == video->stream_index)
-                ::Packet::Video::sender.send(std::move(p));
-            else if (audio && p.packet->stream_index == audio->stream_index)
-                ::Packet::Audio::sender.send(std::move(p));
-            p = av_packet_alloc();
+        while (video || audio) {
+            if (av_read_frame(ictx, p.packet) >= 0) {
+                if (video && p.packet->stream_index == video->stream_index)
+                    ::Packet::Video::sender.send(std::move(p));
+                else if (audio && p.packet->stream_index == audio->stream_index)
+                    ::Packet::Audio::sender.send(std::move(p));
+                p = av_packet_alloc();
+            } else {
+                ::Packet::Video::sender.drop_connection();
+                ::Packet::Audio::sender.drop_connection();
+                bool should_quit = true;
+                while (audio_current_us.load() < duration_us()) {
+                    if (seek_req.load()) {
+                        should_quit = false;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                }
+                if (should_quit) break;
+            }
 
             while (video || audio) {
                 if (seek_req.load()) {
@@ -180,6 +194,7 @@ std::thread Decoder::launch_video_decoder() {
                 if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
                 TRY(res);
                 send(filtered);
+                if (seek_req.load()) throw 0;
             }
         } catch (int err) {
             if (err < 0) {
@@ -242,6 +257,7 @@ std::thread Decoder::launch_audio_decoder() {
                     auto out = resample_audio(nullptr);
                     if (out.frame->nb_samples == 0) break;
                     ::Frame::Audio::sender.send(std::move(out));
+                    if (seek_req.load()) throw 0;
                 }
             }
         } catch (int err) {
