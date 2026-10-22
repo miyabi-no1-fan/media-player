@@ -11,6 +11,7 @@ extern "C" {
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -35,11 +36,25 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         return 0;
     }
 
-    audio_current_us.fetch_add(sample_time_us);
+    self.current_us->fetch_add(sample_time_us);
 
     while (self.queue<T>().size() < needed) {
-        auto res = Frame::Audio::receiver.receive_timeout(std::chrono::microseconds(sample_time_us) * 0.8);
+        auto res = self.receiver->receive_timeout(std::chrono::microseconds(sample_time_us) * 0.8);
+
+        if (audio_seek_req.load()) {
+            // flush
+            self.queue<T>().clear();
+            // create new state
+            self.new_state();
+            // update clock
+            self.current_us->store(seek_time_us.load());
+            // seek done
+            audio_seek_req.store(false);
+            continue;
+        }
+
         if (!res) break;
+
         auto* frame = res->frame;
         assert(frame);
         assert(static_cast<unsigned int>(frame->ch_layout.nb_channels) == self.channels);
@@ -49,13 +64,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
                           static_cast<std::size_t>(frame->ch_layout.nb_channels);
 
         self.queue<T>().append_range(std::span<T>(samples, len));
-
-        if (seek_req.load()) {
-            self.queue<T>().clear();
-            audio_idle.store(true);
-            while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
-            audio_idle.store(false);
-        }
     }
 
     const std::size_t n = std::min(self.queue<T>().size(), needed);
@@ -107,6 +115,15 @@ Audio::~Audio() {
 }
 
 void Audio::play() {
+    new_state();
     if (dac.startStream())
         throw std::runtime_error(dac.getErrorText());
+}
+
+void Audio::new_state() {
+    audio_current_us = std::make_shared<std::atomic_int64_t>(0);
+    current_us = audio_current_us;
+    // wait til channels are valid
+    while (decoder_seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+    receiver = Frame::Audio::receiver;
 }

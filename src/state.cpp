@@ -1,74 +1,76 @@
 #include "state.hpp"
 
+#include <atomic>
+#include <memory>
+
 #include "decoder.hpp"
 #include "ringbuf.hpp"
 #include "spsc.hpp"
 
-std::atomic_int64_t audio_current_us = 0;
-
-std::atomic_bool audio_idle = false;
-std::atomic_bool video_idle = false;
-
+std::shared_ptr<std::atomic_int64_t> audio_current_us = nullptr;
 std::atomic_bool paused = false;
-
-std::atomic_bool seek_available = true;
-std::atomic_bool seek_req = false;
+std::atomic_bool seek_available = false;
+std::atomic_bool decoder_seek_req = false;
+std::atomic_bool audio_seek_req = false;
 std::atomic_int64_t seek_time_us = 0;
 
-void clear_state() {
-    audio_current_us.store(0);
-    audio_idle.store(false);
-    video_idle.store(false);
+void new_state() {
+    audio_current_us = std::make_shared<std::atomic_int64_t>(0);
     paused.store(false);
     seek_available.store(false);
-    seek_req.store(false);
+    decoder_seek_req.store(false);
+    audio_seek_req.store(false);
     seek_time_us.store(0);
+    Packet::new_channels();
+    Frame::new_channels();
 }
 
 namespace Packet {
 namespace Video {
-SPSC::Sender<Decoder::Packet> sender;
-SPSC::Receiver<Decoder::Packet> receiver;
+std::shared_ptr<SPSC::Sender<Decoder::Packet>> sender = nullptr;
+std::shared_ptr<SPSC::Receiver<Decoder::Packet>> receiver = nullptr;
 }  // namespace Video
 namespace Audio {
-SPSC::Sender<Decoder::Packet> sender;
-SPSC::Receiver<Decoder::Packet> receiver;
+std::shared_ptr<SPSC::Sender<Decoder::Packet>> sender = nullptr;
+std::shared_ptr<SPSC::Receiver<Decoder::Packet>> receiver = nullptr;
 }  // namespace Audio
-void init_channels() {
+void new_channels() {
+    using namespace SPSC;
+    using T = Decoder::Packet;
     {
-        auto [s, r] = SPSC::unbounded_channel<Decoder::Packet>();
-        Packet::Video::sender = std::move(s);
-        Packet::Video::receiver = std::move(r);
+        auto [s, r] = unbounded_channel<T>();
+        Packet::Video::sender = std::make_shared<Sender<T>>(std::move(s));
+        Packet::Video::receiver = std::make_shared<Receiver<T>>(std::move(r));
     }
     {
-        auto [s, r] = SPSC::unbounded_channel<Decoder::Packet>();
-        Packet::Audio::sender = std::move(s);
-        Packet::Audio::receiver = std::move(r);
+        auto [s, r] = SPSC::unbounded_channel<T>();
+        Packet::Audio::sender = std::make_shared<Sender<T>>(std::move(s));
+        Packet::Audio::receiver = std::make_shared<Receiver<T>>(std::move(r));
     }
 }
-
 }  // namespace Packet
 
 namespace Frame {
 namespace Video {
-RingBuf::Sender<Decoder::Frame> sender;
-RingBuf::Receiver<Decoder::Frame> receiver;
+std::shared_ptr<RingBuf::Sender<Decoder::Frame>> sender;
+std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver;
 }  // namespace Video
 namespace Audio {
-RingBuf::Sender<Decoder::Frame> sender;
-RingBuf::Receiver<Decoder::Frame> receiver;
+std::shared_ptr<RingBuf::Sender<Decoder::Frame>> sender;
+std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver;
 }  // namespace Audio
-void init_channels() {
+void new_channels() {
+    using namespace RingBuf;
+    using T = Decoder::Frame;
     {
-        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(Video::CONCURRENT_LIMIT);
-        Frame::Video::sender = std::move(s);
-        Frame::Video::receiver = std::move(r);
+        auto [s, r] = bounded_channel<T>(Video::CONCURRENT_LIMIT);
+        Frame::Video::sender = std::make_shared<Sender<T>>(std::move(s));
+        Frame::Video::receiver = std::make_shared<Receiver<Decoder::Frame>>(std::move(r));
     }
     {
-        auto [s, r] = RingBuf::bounded_channel<Decoder::Frame>(Audio::CONCURRENT_LIMIT);
-        Frame::Audio::sender = std::move(s);
-        Frame::Audio::receiver = std::move(r);
+        auto [s, r] = RingBuf::bounded_channel<T>(Audio::CONCURRENT_LIMIT);
+        Frame::Audio::sender = std::make_shared<Sender<T>>(std::move(s));
+        Frame::Audio::receiver = std::make_shared<Receiver<T>>(std::move(r));
     }
 }
-
 }  // namespace Frame

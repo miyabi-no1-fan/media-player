@@ -19,7 +19,6 @@ extern "C" {
 }
 
 #include "matrix.hpp"
-#include "ringbuf.hpp"
 #include "state.hpp"
 #include "textures.hpp"
 #include "textures/progress_bar.hpp"
@@ -62,13 +61,13 @@ void Video::play() {
             }
         }
 
-        if (!key_left_locked) {
+        if (!key_left_locked && audio_current_us) {
             int key_right = glfwGetKey(w, GLFW_KEY_RIGHT);
 
             if (key_right == GLFW_PRESS) {
                 if (!key_right_locked && seek_available.load()) {
                     auto target_us = std::clamp(
-                        audio_current_us.load() + 5 * AV_TIME_BASE,
+                        audio_current_us->load() + 5 * AV_TIME_BASE,
                         std::int64_t(0),
                         duration_us);
                     seek(target_us);
@@ -82,13 +81,13 @@ void Video::play() {
             }
         }
 
-        if (!key_right_locked) {
+        if (!key_right_locked && audio_current_us) {
             int key_left = glfwGetKey(w, GLFW_KEY_LEFT);
 
             if (key_left == GLFW_PRESS) {
                 if (!key_left_locked && seek_available.load()) {
                     auto target_us = std::clamp(
-                        audio_current_us.load() - 5 * AV_TIME_BASE,
+                        audio_current_us->load() - 5 * AV_TIME_BASE,
                         std::int64_t(0),
                         duration_us);
                     seek(target_us);
@@ -119,35 +118,34 @@ void Video::play() {
 }
 
 void Video::seek(std::int64_t target_us) {
-    #ifndef NDEBUG
-    using namespace std::chrono;
-    auto _db_time_start = steady_clock::now();
-    #endif
     paused.store(false);
     seek_time_us.store(target_us);
-    video_idle.store(true);
-    seek_req.store(true);
-    while (seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
-    video_idle.store(false);
-    #ifndef NDEBUG
-    std::cout << "Seek request time: " << duration_cast<milliseconds>(steady_clock::now() - _db_time_start) << std::endl;
-    #endif
+    decoder_seek_req.store(true);  // order matter
+    audio_current_us = nullptr;
+    audio_seek_req.store(true);
+    // wait for unfinished seek request to finish
+    // moved to `Video::render`
 }
 
 bool Video::render() {
     window.poll_events();
 
+    // wait for unfinished seek request to finish
+    while (audio_seek_req.load() || decoder_seek_req.load()) {
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+
     Decoder::Frame decoded = {};
     if (!paused.load() && has_video) {
         while (1) {
-            auto res = Frame::Video::receiver.receive();
+            auto res = Frame::Video::receiver->receive();
             if (!res) return false;
 
             std::int64_t pts = av_rescale_q(res->frame->best_effort_timestamp, res->frame->time_base, AV_TIME_BASE_Q);
             if (!pts_offset) pts_offset = pts;
             else pts -= *pts_offset;
 
-            std::int64_t target = audio_current_us.load();
+            std::int64_t target = audio_current_us->load();
 
             if (pts < target - frame_time_us) {
                 // underrun
@@ -156,7 +154,7 @@ bool Video::render() {
                 // overrun
                 while (pts > target + frame_time_us) {
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    target = audio_current_us.load();
+                    target = audio_current_us->load();
                 }
                 decoded = std::move(*res);
                 break;
@@ -171,13 +169,13 @@ bool Video::render() {
         // We skipped receive because of no video,
         // so we won't receive any EndOfInput signal from decoder.
         // This is the fallback
-        if (audio_current_us.load() >= duration_us) return false;
+        if (audio_current_us->load() >= duration_us) return false;
     }
 
     float progress =
         (should_hide_progress_bar)
             ? 0.f
-            : static_cast<float>(audio_current_us.load()) / static_cast<float>(duration_us);
+            : static_cast<float>(audio_current_us->load()) / static_cast<float>(duration_us);
 
     if (decoded.frame == nullptr &&
         !window.was_window_resized() &&

@@ -51,10 +51,7 @@ int main(int argc, const char* argv[]) try {
     std::unique_ptr<Video> video = nullptr;
 
     for (int i = 0; i < info.loop; i++) {
-        clear_state();
-
-        Packet::init_channels();
-        Frame::init_channels();
+        new_state();
 
         Decoder decoder(info.path.c_str());
         if (info.no_video ||

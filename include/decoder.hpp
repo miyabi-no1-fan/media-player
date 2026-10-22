@@ -20,8 +20,8 @@ extern "C" {
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -50,7 +50,6 @@ class Decoder {
         AVFilterGraph* graph = nullptr;
         AVFilterContext* buffersrc_ctx = nullptr;
         AVFilterContext* buffersink_ctx = nullptr;
-        operator bool() { return graph; }
         Filter() {}
         ~Filter() {
             avfilter_graph_free(&graph);
@@ -72,7 +71,7 @@ class Decoder {
             }
             return *this;
         }
-    } filter;
+    };
 
     struct Stream {
         int stream_index = -1;
@@ -94,9 +93,6 @@ class Decoder {
         SwrContext* swr = nullptr;
         AudioStream(Stream&& s) : Stream(std::move(s)) {
             if (supported_audio_formats.contains(decoder->sample_fmt)) return;
-            #ifndef NDEBUG
-            std::cout << "using software resampling\n";
-            #endif
             create_swr();
         }
         void create_swr() {
@@ -120,8 +116,10 @@ class Decoder {
         ~AudioStream() { swr_free(&swr); }
     };
 
-    std::optional<VideoStream> video = std::nullopt;
-    std::optional<AudioStream> audio = std::nullopt;
+    std::shared_ptr<Filter> filter = nullptr;
+
+    std::shared_ptr<VideoStream> video = nullptr;
+    std::shared_ptr<AudioStream> audio = nullptr;
 
    public:
     Decoder(const char* path) {
@@ -131,8 +129,8 @@ class Decoder {
             throw std::runtime_error("Cannot read input file: " + std::string(path));
         }
 
-        if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video.emplace(std::move(*strm));
-        if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio.emplace(std::move(*strm));
+        if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video = std::make_shared<VideoStream>(std::move(*strm));
+        if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio = std::make_shared<AudioStream>(std::move(*strm));
 
         if (video) {
             bool has_subtitle = false;
@@ -149,8 +147,8 @@ class Decoder {
         }
     }
 
-    void no_video() { video = std::nullopt; }
-    void no_audio() { audio = std::nullopt; }
+    void no_video() { video = nullptr; }
+    void no_audio() { audio = nullptr; }
 
     struct Frame {
         AVFrame* frame = nullptr;
@@ -179,8 +177,8 @@ class Decoder {
         avformat_close_input(&ictx);
     }
 
-    bool has_video() const { return video.has_value(); }
-    bool has_audio() const { return audio.has_value(); }
+    bool has_video() const { return video != nullptr; }
+    bool has_audio() const { return audio != nullptr; }
 
     // for video
     std::optional<int> width() const {
@@ -262,7 +260,7 @@ class Decoder {
     }
 
    private:
-    std::optional<Stream> new_stream(AVMediaType type);
+    std::optional<Stream> new_stream(AVMediaType type) const;
 
    public:
     struct Packet {
@@ -285,8 +283,8 @@ class Decoder {
     };
 
    private:
-    int init_filters();
-    std::thread launch_video_decoder();
-    std::thread launch_audio_decoder();
-    Frame resample_audio(const AVFrame* input);
+    int init_filters() const;
+    std::thread launch_video_decoder() const;
+    std::thread launch_audio_decoder() const;
+    Frame resample_audio(const AVFrame* input) const;
 };

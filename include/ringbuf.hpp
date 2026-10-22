@@ -75,6 +75,7 @@ class Receiver {
     }
 };
 
+// Sender destructor **will not** `send_eof`
 template <typename T>
 class Sender {
     std::shared_ptr<std::vector<std::optional<T>>> buf = nullptr;
@@ -89,9 +90,7 @@ class Sender {
            std::shared_ptr<std::atomic<std::size_t>> msg_count)
         : buf(std::move(buf)), msg_count(std::move(msg_count)) {}
 
-    ~Sender() {
-        send_eof();
-    }
+    ~Sender() {}
 
     Sender(const Sender&) = delete;
     Sender& operator=(const Sender&) = delete;

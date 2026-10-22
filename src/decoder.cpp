@@ -7,6 +7,7 @@
 #include <expected>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -32,11 +33,16 @@ extern "C" {
 static std::atomic_int video_decoder_status = 0;
 static std::atomic_int audio_decoder_status = 0;
 
+static std::shared_ptr<std::atomic_bool> sub_decoders_should_quit = nullptr;
+
 std::thread Decoder::launch() {
     return std::thread([this]() mutable {
         video_decoder_status.store(0);
         audio_decoder_status.store(0);
         seek_available.store(true);
+        sub_decoders_should_quit = std::make_shared<std::atomic_bool>(false);
+
+        filter = std::make_shared<Filter>();
 
         std::thread video_thrd, audio_thrd;
         if (video) video_thrd = launch_video_decoder();
@@ -46,16 +52,16 @@ std::thread Decoder::launch() {
         while (video || audio) {
             if (av_read_frame(ictx, p.packet) >= 0) {
                 if (video && p.packet->stream_index == video->stream_index)
-                    ::Packet::Video::sender.send(std::move(p));
+                    ::Packet::Video::sender->send(std::move(p));
                 else if (audio && p.packet->stream_index == audio->stream_index)
-                    ::Packet::Audio::sender.send(std::move(p));
+                    ::Packet::Audio::sender->send(std::move(p));
                 p = av_packet_alloc();
             } else {
-                ::Packet::Video::sender.drop_connection();
-                ::Packet::Audio::sender.drop_connection();
+                ::Packet::Video::sender->drop_connection();
+                ::Packet::Audio::sender->drop_connection();
                 bool should_quit = true;
-                while (audio_current_us.load() < duration_us()) {
-                    if (seek_req.load()) {
+                while (audio_current_us->load() < duration_us()) {
+                    if (decoder_seek_req.load()) {
                         should_quit = false;
                         break;
                     }
@@ -65,7 +71,8 @@ std::thread Decoder::launch() {
             }
 
             while (video || audio) {
-                if (seek_req.load()) {
+                if (decoder_seek_req.load()) {
+                    // seek frame
                     std::int64_t ts = seek_time_us.load();
                     int stream_index = -1;
                     if (audio) stream_index = audio->stream_index;
@@ -75,38 +82,39 @@ std::thread Decoder::launch() {
                                   av_rescale_q(ts, AV_TIME_BASE_Q, ictx->streams[stream_index]->time_base),
                                   AVSEEK_FLAG_BACKWARD);
 
-                    // while (video && !video_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    while (audio && !audio_idle.load()) std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    if (video_thrd.joinable()) {
-                        while (::Frame::Video::receiver.try_receive());
-                        video_thrd.join();
-                    }
-                    if (audio_thrd.joinable()) {
-                        while (::Frame::Audio::receiver.try_receive());
-                        audio_thrd.join();
-                    }
-                    if (video) avcodec_flush_buffers(video->decoder);
-                    if (audio) avcodec_flush_buffers(audio->decoder);
-                    if (video) init_filters();
-                    if (audio && audio->swr) audio->create_swr();
-                    ::Packet::init_channels();
-                    ::Frame::init_channels();
+                    // tell sub-decode threads to quit -- this is flush
+                    sub_decoders_should_quit->store(true);
+                    if (video_thrd.joinable()) video_thrd.detach();
+                    if (audio_thrd.joinable()) audio_thrd.detach();
+
+                    /* sub-decode threads capture state by `shared_ptr`s
+                    we just need to create new `shared_ptr`s and let
+                    the old sub decoders threads die with the old state. */
+
+                    // create new state
+                    sub_decoders_should_quit = std::make_shared<std::atomic_bool>(false);
+                    if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video = std::make_shared<VideoStream>(std::move(*strm));
+                    if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio = std::make_shared<AudioStream>(std::move(*strm));
+                    if (video) filter = std::make_shared<Filter>();
+                    ::Packet::new_channels();
+                    ::Frame::new_channels();
                     if (video) video_thrd = launch_video_decoder();
                     if (audio) audio_thrd = launch_audio_decoder();
-                    audio_current_us.store(ts);
-                    seek_req.store(false);
+
+                    // seek done
+                    decoder_seek_req.store(false);
                     break;
                 }
 
                 if (video_decoder_status.load(std::memory_order::relaxed) < 0)
-                    video = std::nullopt;
+                    video = nullptr;
                 if (audio_decoder_status.load(std::memory_order::relaxed) < 0)
-                    audio = std::nullopt;
+                    audio = nullptr;
 
                 unsigned long v = std::numeric_limits<unsigned long>::max();
-                if (video) v = ::Packet::Video::sender.len();
+                if (video) v = ::Packet::Video::sender->len();
                 unsigned long a = std::numeric_limits<unsigned long>::max();
-                if (audio) a = ::Packet::Audio::sender.len();
+                if (audio) a = ::Packet::Audio::sender->len();
                 if (v <= ::Packet::Video::SOFT_LIMIT ||
                     a <= ::Packet::Audio::SOFT_LIMIT) {
                     break;
@@ -117,14 +125,14 @@ std::thread Decoder::launch() {
 
         seek_available.store(false);
 
-        ::Packet::Video::sender.drop_connection();
-        ::Packet::Audio::sender.drop_connection();
+        if (video) ::Packet::Video::sender->drop_connection();
+        if (audio) ::Packet::Audio::sender->drop_connection();
 
         if (video_thrd.joinable()) video_thrd.join();
         if (audio_thrd.joinable()) audio_thrd.join();
 
-        ::Frame::Video::sender.send_eof();
-        ::Frame::Audio::sender.send_eof();
+        if (video) ::Frame::Video::sender->send_eof();
+        if (audio) ::Frame::Audio::sender->send_eof();
     });
 }
 
@@ -134,40 +142,55 @@ std::thread Decoder::launch() {
         if ((ret = expr) < 0) throw ret; \
     } while (0)
 
-std::thread Decoder::launch_video_decoder() {
+std::thread Decoder::launch_video_decoder() const {
     assert(video);
-    return std::thread([this]() mutable {
+    // capture by copy the current state of the decoder
+    return std::thread([this,
+                        video = video,
+                        sender = ::Frame::Video::sender,
+                        receiver = ::Packet::Video::receiver,
+                        filter = filter,
+                        should_quit = sub_decoders_should_quit]() {
         try {
-            auto send = [this](Frame& v) {
+            auto send = [this, &video, &sender, &should_quit](Frame& v) {
                 v.frame->time_base = ictx->streams[video->stream_index]->time_base;
                 Frame out = av_frame_alloc();
                 av_frame_ref(out.frame, v.frame);
-                ::Frame::Video::sender.send(std::move(out));
+                while (1) {
+                    auto r = sender->try_send(std::move(out));
+                    if (!r) break;
+                    out = std::move(*r);
+                    if (should_quit->load()) throw 0;
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                }
                 av_frame_unref(v.frame);
             };
 
             Frame decoded = av_frame_alloc();
             auto receive_franes = [&]() {
                 while (avcodec_receive_frame(video->decoder, decoded.frame) >= 0) {
-                    if (!filter) init_filters();
+                    if (!filter->graph) init_filters();
+
+                    std::int64_t target_us;
+                    if (!audio_seek_req.load()) target_us = audio_current_us->load();
+                    else target_us = seek_time_us.load();
 
                     std::int64_t target_ts = av_rescale_q(
-                        audio_current_us.load(),
+                        target_us,
                         AV_TIME_BASE_Q,
                         ictx->streams[video->stream_index]->time_base);
 
                     decoded.frame->pts = decoded.frame->best_effort_timestamp;
 
                     if (decoded.frame->pts >= target_ts) {
-                        TRY(av_buffersrc_add_frame_flags(filter.buffersrc_ctx, decoded.frame, AV_BUFFERSRC_FLAG_KEEP_REF));
+                        TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, decoded.frame, AV_BUFFERSRC_FLAG_KEEP_REF));
                         Frame filtered = av_frame_alloc();
                         av_frame_copy_props(filtered.frame, decoded.frame);
                         while (1) {
-                            int res = av_buffersink_get_frame(filter.buffersink_ctx, filtered.frame);
+                            int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.frame);
                             if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
                             TRY(res);
                             send(filtered);
-                            if (seek_req.load()) throw 0;
                         }
                     }
 
@@ -176,7 +199,7 @@ std::thread Decoder::launch_video_decoder() {
             };
 
             while (1) {
-                auto rec = ::Packet::Video::receiver.try_receive();
+                auto rec = receiver->try_receive();
                 if (const auto& pkt = rec) {
                     if (avcodec_send_packet(video->decoder, pkt->packet) >= 0)
                         receive_franes();
@@ -185,21 +208,20 @@ std::thread Decoder::launch_video_decoder() {
                     else std::this_thread::sleep_for(std::chrono::microseconds(100));
                 }
 
-                if (seek_req.load()) throw 0;
+                if (should_quit->load()) throw 0;
             }
 
             TRY(avcodec_send_packet(video->decoder, nullptr));
             receive_franes();
 
-            TRY(av_buffersrc_add_frame_flags(filter.buffersrc_ctx, nullptr, 0));
+            TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, nullptr, 0));
             Frame filtered = av_frame_alloc();
             av_frame_copy_props(filtered.frame, decoded.frame);
             while (1) {
-                int res = av_buffersink_get_frame(filter.buffersink_ctx, filtered.frame);
+                int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.frame);
                 if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
                 TRY(res);
                 send(filtered);
-                if (seek_req.load()) throw 0;
             }
         } catch (int err) {
             if (err < 0) {
@@ -211,15 +233,34 @@ std::thread Decoder::launch_video_decoder() {
     });
 }
 
-std::thread Decoder::launch_audio_decoder() {
+std::thread Decoder::launch_audio_decoder() const {
     assert(audio);
-    return std::thread([this]() mutable {
+    // capture by copy the current state of the decoder
+    return std::thread([this,
+                        audio = audio,
+                        sender = ::Frame::Audio::sender,
+                        receiver = ::Packet::Audio::receiver,
+                        should_quit = sub_decoders_should_quit]() {
         try {
+            auto send = [&sender, &should_quit](Frame o) {
+                while (1) {
+                    auto r = sender->try_send(std::move(o));
+                    if (!r) break;
+                    o = std::move(*r);
+                    if (should_quit->load()) throw 0;
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                }
+            };
+
             Frame decoded = av_frame_alloc();
             auto receive_franes = [&]() {
                 while (avcodec_receive_frame(audio->decoder, decoded.frame) >= 0) {
+                    std::int64_t target_us;
+                    if (!audio_seek_req.load()) target_us = audio_current_us->load();
+                    else target_us = seek_time_us.load();
+
                     std::int64_t target_ts = av_rescale_q(
-                        audio_current_us.load(),
+                        target_us,
                         AV_TIME_BASE_Q,
                         ictx->streams[audio->stream_index]->time_base);
 
@@ -228,21 +269,19 @@ std::thread Decoder::launch_audio_decoder() {
                     if (decoded.frame->pts >= target_ts) {
                         if (audio->swr) {
                             auto out = resample_audio(decoded.frame);
-                            ::Frame::Audio::sender.send(std::move(out));
+                            send(std::move(out));
                         } else {
-                            ::Frame::Audio::sender.send(std::move(decoded));
+                            send(std::move(decoded));
                         }
                     }
 
                     if (decoded.frame) av_frame_unref(decoded.frame);
                     else decoded = av_frame_alloc();
-
-                    if (seek_req.load()) throw 0;
                 }
             };
 
             while (1) {
-                auto rec = ::Packet::Audio::receiver.try_receive();
+                auto rec = receiver->try_receive();
                 if (const auto& pkt = rec) {
                     if (avcodec_send_packet(audio->decoder, pkt->packet) >= 0)
                         receive_franes();
@@ -251,7 +290,7 @@ std::thread Decoder::launch_audio_decoder() {
                     else std::this_thread::sleep_for(std::chrono::microseconds(100));
                 }
 
-                if (seek_req.load()) throw 0;
+                if (should_quit->load()) throw 0;
             }
 
             TRY(avcodec_send_packet(audio->decoder, nullptr));
@@ -261,8 +300,7 @@ std::thread Decoder::launch_audio_decoder() {
                 while (1) {
                     auto out = resample_audio(nullptr);
                     if (out.frame->nb_samples == 0) break;
-                    ::Frame::Audio::sender.send(std::move(out));
-                    if (seek_req.load()) throw 0;
+                    send(std::move(out));
                 }
             }
         } catch (int err) {
@@ -275,7 +313,7 @@ std::thread Decoder::launch_audio_decoder() {
     });
 }
 
-Decoder::Frame Decoder::resample_audio(const AVFrame* input) {
+Decoder::Frame Decoder::resample_audio(const AVFrame* input) const {
     Frame out = av_frame_alloc();
     int64_t sample_rate;
     TRY(av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate));
@@ -286,7 +324,7 @@ Decoder::Frame Decoder::resample_audio(const AVFrame* input) {
     return out;
 }
 
-std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
+std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) const {
     const AVCodec* codec = nullptr;
     int index = av_find_best_stream(ictx, type, -1, -1, &codec, 0);
     if (index < 0 || codec == nullptr)
@@ -305,9 +343,7 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
 }
 
 // copy from https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c
-int Decoder::init_filters() {
-    filter = {};
-
+int Decoder::init_filters() const {
     char args[512];
     int ret = 0;
     const AVFilter* buffersrc = avfilter_get_by_name("buffer");
@@ -316,8 +352,8 @@ int Decoder::init_filters() {
     AVFilterInOut* inputs = avfilter_inout_alloc();
     AVRational time_base = ictx->streams[video->stream_index]->time_base;
 
-    filter.graph = avfilter_graph_alloc();
-    if (!outputs || !inputs || !filter.graph) {
+    filter->graph = avfilter_graph_alloc();
+    if (!outputs || !inputs || !filter->graph) {
         ret = AVERROR(ENOMEM);
         goto end;
     }
@@ -336,27 +372,27 @@ int Decoder::init_filters() {
              av_color_space_name(video->decoder->colorspace),
              av_color_range_name(video->decoder->color_range));
 
-    ret = avfilter_graph_create_filter(&filter.buffersrc_ctx, buffersrc, "in", args, NULL, filter.graph);
+    ret = avfilter_graph_create_filter(&filter->buffersrc_ctx, buffersrc, "in", args, NULL, filter->graph);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
         goto end;
     }
 
     /* buffer video sink: to terminate the filter chain. */
-    filter.buffersink_ctx = avfilter_graph_alloc_filter(filter.graph, buffersink, "out");
-    if (!filter.buffersink_ctx) {
+    filter->buffersink_ctx = avfilter_graph_alloc_filter(filter->graph, buffersink, "out");
+    if (!filter->buffersink_ctx) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
         ret = AVERROR(ENOMEM);
         goto end;
     }
 
-    ret = av_opt_set(filter.buffersink_ctx, "pixel_formats", pixel_format, AV_OPT_SEARCH_CHILDREN);
+    ret = av_opt_set(filter->buffersink_ctx, "pixel_formats", pixel_format, AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
         goto end;
     }
 
-    ret = avfilter_init_dict(filter.buffersink_ctx, NULL);
+    ret = avfilter_init_dict(filter->buffersink_ctx, NULL);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot initialize buffer sink\n");
         goto end;
@@ -374,7 +410,7 @@ int Decoder::init_filters() {
      * default.
      */
     outputs->name = av_strdup("in");
-    outputs->filter_ctx = filter.buffersrc_ctx;
+    outputs->filter_ctx = filter->buffersrc_ctx;
     outputs->pad_idx = 0;
     outputs->next = NULL;
 
@@ -385,14 +421,14 @@ int Decoder::init_filters() {
      * default.
      */
     inputs->name = av_strdup("out");
-    inputs->filter_ctx = filter.buffersink_ctx;
+    inputs->filter_ctx = filter->buffersink_ctx;
     inputs->pad_idx = 0;
     inputs->next = NULL;
 
-    if ((ret = avfilter_graph_parse_ptr(filter.graph, filter_descr.c_str(), &inputs, &outputs, NULL)) < 0)
+    if ((ret = avfilter_graph_parse_ptr(filter->graph, filter_descr.c_str(), &inputs, &outputs, NULL)) < 0)
         goto end;
 
-    if ((ret = avfilter_graph_config(filter.graph, NULL)) < 0)
+    if ((ret = avfilter_graph_config(filter->graph, NULL)) < 0)
         goto end;
 
 end:
