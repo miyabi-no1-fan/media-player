@@ -15,7 +15,6 @@ extern "C" {
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "state.hpp"
@@ -50,6 +49,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
             self.current_us->store(seek_time_us.load());
             // seek done
             audio_seek_req.store(false);
+            audio_seek_req.notify_all();
             continue;
         }
 
@@ -124,6 +124,6 @@ void Audio::new_state() {
     audio_current_us = std::make_shared<std::atomic_int64_t>(0);
     current_us = audio_current_us;
     // wait til channels are valid
-    while (decoder_seek_req.load()) std::this_thread::sleep_for(std::chrono::microseconds(10));
+    decoder_seek_req.wait(true);
     receiver = Frame::Audio::receiver;
 }

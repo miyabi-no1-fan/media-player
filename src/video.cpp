@@ -131,9 +131,8 @@ bool Video::render() {
     window.poll_events();
 
     // wait for unfinished seek request to finish
-    while (audio_seek_req.load() || decoder_seek_req.load()) {
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-    }
+    audio_seek_req.wait(true);
+    decoder_seek_req.wait(true);
 
     Decoder::Frame decoded = {};
     if (!paused.load() && has_video) {
