@@ -28,10 +28,9 @@ extern std::shared_ptr<std::atomic_int64_t> audio_current_us;
 // if `seek_req_ok == true`, `audio_seek_req` = false.
 
 // So a seek chain is
-// `seek_req_ok`, set false by video
 // `decoder_seek_req`, set true by video, audio wait for false.
 // `audio_seek_req`, set true by video, video wait for false.
-// `seek_req_ok`, audio wait for true.
+// `seek_req_ok`, set false by video, audio wait for true.
 
 // atomic ordering are `seq_cst`
 
