@@ -24,6 +24,7 @@ extern "C" {
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -136,6 +137,7 @@ class Decoder {
 
         if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video = std::make_shared<VideoStream>(std::move(*strm));
         if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio = std::make_shared<AudioStream>(std::move(*strm));
+        discard_unused_streams({ AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_AUDIO });
 
         if (video) {
             bool has_subtitle = false;
@@ -266,6 +268,7 @@ class Decoder {
 
    private:
     std::optional<Stream> new_stream(AVMediaType type) const;
+    void discard_unused_streams(const std::set<AVMediaType> used_streams);
 
    public:
     struct Packet {

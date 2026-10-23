@@ -13,6 +13,7 @@
 #include <utility>
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavcodec/defs.h>
 #include <libavcodec/packet.h>
 #include <libavfilter/avfilter.h>
 #include <libavfilter/buffersink.h>
@@ -335,6 +336,15 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) const {
         return std::nullopt;
     }
     return Stream(index, codec, decoder);
+}
+
+void Decoder::discard_unused_streams(const std::set<AVMediaType> used_streams) {
+    for (unsigned i = 0; i < ictx->nb_streams; i++) {
+        AVStream* strm = ictx->streams[i];
+        if (!used_streams.contains(strm->codecpar->codec_type)) {
+            strm->discard = AVDISCARD_ALL;
+        }
+    }
 }
 
 // copy from https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c
