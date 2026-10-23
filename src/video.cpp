@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -67,7 +66,7 @@ void Video::play() {
             if (key_right == GLFW_PRESS) {
                 if (!key_right_locked && seek_available.load()) {
                     auto target_us = std::clamp(
-                        audio_current_us->load() + 5 * AV_TIME_BASE,
+                        audio_current_us->load() + 10 * AV_TIME_BASE,
                         std::int64_t(0),
                         duration_us);
                     seek(target_us);
@@ -87,7 +86,7 @@ void Video::play() {
             if (key_left == GLFW_PRESS) {
                 if (!key_left_locked && seek_available.load()) {
                     auto target_us = std::clamp(
-                        audio_current_us->load() - 5 * AV_TIME_BASE,
+                        audio_current_us->load() - 10 * AV_TIME_BASE,
                         std::int64_t(0),
                         duration_us);
                     seek(target_us);
