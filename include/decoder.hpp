@@ -10,6 +10,7 @@ extern "C" {
 #include <libavutil/avutil.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
+#include <libavutil/log.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libavutil/pixfmt.h>
@@ -123,6 +124,10 @@ class Decoder {
 
    public:
     Decoder(const char* path) {
+        #ifdef NDEBUG
+        av_log_set_level(AV_LOG_ERROR);
+        #endif
+
         if (avformat_open_input(&ictx, path, nullptr, nullptr) < 0 ||
             avformat_find_stream_info(ictx, nullptr) < 0) {
             avformat_close_input(&ictx);
