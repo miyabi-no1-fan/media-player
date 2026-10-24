@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <thread>
