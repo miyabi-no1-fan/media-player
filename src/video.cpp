@@ -134,7 +134,13 @@ bool Video::render() {
     if (!paused.load() && has_video) {
         while (1) {
             auto res = Frame::Video::receiver->receive();
-            if (!res) return false;
+            if (!res) {
+                // edge case: quit while seek_req_ok is false
+                seek_req_ok.store(true);
+                seek_req_ok.notify_all();
+                // !res means end of input
+                return false;
+            }
 
             std::int64_t pts = av_rescale_q(res->frame->best_effort_timestamp, res->frame->time_base, AV_TIME_BASE_Q);
             if (!pts_offset) pts_offset = pts;
