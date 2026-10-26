@@ -40,6 +40,9 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     self.current_us->fetch_add(sample_time_us);
 
     while (self.queue<T>().size() < needed) {
+        if (std::chrono::steady_clock::now() >= deadline)
+            deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(sample_time_us);
+
         auto res = self.receiver->receive_deadline(deadline - std::chrono::microseconds(10));
 
         if (audio_seek_req.load()) {
