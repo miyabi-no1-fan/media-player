@@ -37,7 +37,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         return 0;
     }
 
-    auto target_us = self.current_us->fetch_add(sample_time_us);
+    self.current_us->fetch_add(sample_time_us);
 
     while (self.queue<T>().size() < needed) {
         auto res = self.receiver->receive_deadline(deadline - std::chrono::microseconds(10));
@@ -63,15 +63,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         auto* frame = res->frame;
         assert(frame);
         assert(static_cast<unsigned int>(frame->ch_layout.nb_channels) == self.channels);
-
-        std::int64_t pts = av_rescale_q(frame->pts, frame->time_base, AV_TIME_BASE_Q);
-        if (!self.pts_offset) self.pts_offset = pts;
-        else pts -= *self.pts_offset;
-
-        if (pts < target_us - sample_time_us) {
-            // underrun
-            continue;
-        }
 
         T* samples = reinterpret_cast<T*>(frame->data[0]);
         std::size_t len = static_cast<std::size_t>(frame->nb_samples) *
