@@ -163,7 +163,7 @@ bool Video::render() {
     // video frame is ready, so we clear this flag
     if (!seek_req_ok.load()) {
         seek_req_ok.store(true);
-        seek_req_ok.notify_one();
+        seek_req_ok.notify_all();
     }
 
     if (!has_video) {

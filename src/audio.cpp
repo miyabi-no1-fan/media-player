@@ -54,7 +54,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
             self.current_us->store(seek_time_us.load());
             // seek done
             audio_seek_req.store(false);
-            audio_seek_req.notify_one();
+            audio_seek_req.notify_all();
             // wait for video
             seek_req_ok.store(false);
             seek_req_ok.wait(false);

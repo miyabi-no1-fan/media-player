@@ -98,7 +98,7 @@ std::thread Decoder::launch() {
 
                     // seek done
                     decoder_seek_req.store(false);
-                    decoder_seek_req.notify_one();
+                    decoder_seek_req.notify_all();
                     break;
                 }
 
