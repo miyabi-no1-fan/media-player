@@ -28,9 +28,10 @@ void Video::play() {
     GLFWwindow* w = window.get_window();
 
     bool key_space_locked = false;
-    bool key_right_locked = false;
-    bool key_left_locked = false;
     bool click_left_locked = false;
+
+    std::int64_t key_cooldown_us = 0;
+    constexpr std::int64_t COOLDOWN = AV_TIME_BASE / 10;  // 0.1s
 
     while (render()) {
         if (window.should_close()) std::quick_exit(0);
@@ -61,43 +62,31 @@ void Video::play() {
             }
         }
 
-        if (!key_left_locked && seek_req_ok.load()) {
+        if (key_cooldown_us == 0 && seek_req_ok.load() && seek_available.load()) {
             int key_right = glfwGetKey(w, GLFW_KEY_RIGHT);
 
             if (key_right == GLFW_PRESS) {
-                if (!key_right_locked && seek_available.load()) {
-                    auto target_us = std::clamp(
-                        audio_current_us->load() + 10 * AV_TIME_BASE,
-                        std::int64_t(0),
-                        duration_us);
-                    seek(target_us);
-                    show_progress_bar();
-                }
-                key_right_locked = true;
-            }
-
-            if (key_right == GLFW_RELEASE) {
-                key_right_locked = false;
+                auto target_us = std::clamp(
+                    audio_current_us->load() + 10 * AV_TIME_BASE,
+                    std::int64_t(0),
+                    duration_us);
+                seek(target_us);
+                show_progress_bar();
+                key_cooldown_us = COOLDOWN;
             }
         }
 
-        if (!key_right_locked && seek_req_ok.load()) {
+        if (key_cooldown_us == 0 && seek_req_ok.load() && seek_available.load()) {
             int key_left = glfwGetKey(w, GLFW_KEY_LEFT);
 
             if (key_left == GLFW_PRESS) {
-                if (!key_left_locked && seek_available.load()) {
-                    auto target_us = std::clamp(
-                        audio_current_us->load() - 10 * AV_TIME_BASE,
-                        std::int64_t(0),
-                        duration_us);
-                    seek(target_us);
-                    show_progress_bar();
-                }
-                key_left_locked = true;
-            }
-
-            if (key_left == GLFW_RELEASE) {
-                key_left_locked = false;
+                auto target_us = std::clamp(
+                    audio_current_us->load() - 10 * AV_TIME_BASE,
+                    std::int64_t(0),
+                    duration_us);
+                seek(target_us);
+                show_progress_bar();
+                key_cooldown_us = COOLDOWN;
             }
         }
 
@@ -114,6 +103,8 @@ void Video::play() {
                 show_progress_bar();
             }
         }
+
+        key_cooldown_us = std::max(key_cooldown_us - frame_time_us, std::int64_t(0));
     }
 }
 
