@@ -18,5 +18,6 @@ Open an issue if you want support on your platform.
 ```bash
 git clone https://github.com/miyabi-no1-fan/media-player.git
 cd media-player
-./build.py # change some option in the file if you want
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
