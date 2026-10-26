@@ -16,6 +16,7 @@ class Audio {
     unsigned int sample_rate;
     std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver = nullptr;
     std::shared_ptr<std::atomic_int64_t> current_us = nullptr;
+    std::optional<std::atomic_int64_t> pts_offset = 0;
 
     std::variant<
         std::vector<float>,
@@ -34,8 +35,8 @@ class Audio {
 
     Audio(const Audio&) = delete;
     Audio& operator=(const Audio&) = delete;
-    Audio(Audio&&) noexcept = default;
-    Audio& operator=(Audio&&) noexcept = default;
+    Audio(Audio&&) noexcept = delete;
+    Audio& operator=(Audio&&) noexcept = delete;
 
    private:
     template <typename T>

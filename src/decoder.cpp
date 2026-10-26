@@ -238,8 +238,9 @@ std::thread Decoder::launch_audio_decoder() const {
                         receiver = ::Packet::Audio::receiver,
                         should_quit = sub_decoders_should_quit]() {
         try {
-            auto send = [&sender, &should_quit](Frame o) {
+            auto send = [this, &sender, &audio, &should_quit](Frame o) {
                 while (1) {
+                    o.frame->time_base = ictx->streams[audio->stream_index]->time_base;
                     auto r = sender->try_send(std::move(o));
                     if (!r) break;
                     o = std::move(*r);
@@ -265,6 +266,7 @@ std::thread Decoder::launch_audio_decoder() const {
                     if (decoded.frame->pts >= target_ts) {
                         if (audio->swr) {
                             auto out = resample_audio(decoded.frame);
+                            out.frame->pts = decoded.frame->best_effort_timestamp;
                             send(std::move(out));
                         } else {
                             send(std::move(decoded));
@@ -295,6 +297,7 @@ std::thread Decoder::launch_audio_decoder() const {
             if (audio->swr) {
                 while (1) {
                     auto out = resample_audio(nullptr);
+                    out.frame->pts = decoded.frame->best_effort_timestamp;
                     if (out.frame->nb_samples == 0) break;
                     send(std::move(out));
                 }
