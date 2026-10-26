@@ -1,10 +1,6 @@
 #include "pipeline.hpp"
 
-#include <cstddef>
 #include <cstdint>
-#include <fstream>
-#include <ios>
-#include <stdexcept>
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
@@ -14,32 +10,14 @@ void GraphicsPipeline::bind(const vk::UniqueCommandBuffer& command_buffer) {
     command_buffer->bindPipeline(vk::PipelineBindPoint::eGraphics, *pipeline);
 }
 
-std::vector<std::uint32_t> read_file(const std::string& path) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file.is_open())
-        throw std::runtime_error("Can't open file " + path);
-
-    std::size_t len = static_cast<std::size_t>(file.tellg());
-    if (len % 4 != 0)
-        throw std::runtime_error("File " + path + "is not a valid spv file");
-
-    std::vector<std::uint32_t> content(len / 4);
-    file.seekg(0).read(reinterpret_cast<char*>(content.data()), len);
-
-    return content;
-}
-
 GraphicsPipeline::GraphicsPipeline(
     const Context& ctx,
     const vk::UniquePipelineLayout& pipeline_layout,
     const vk::UniqueRenderPass& render_pass,
     std::uint32_t subpass,
-    const std::string& vertex_shader_path,
-    const std::string& fragment_shader_path,
+    std::span<const std::uint32_t> vertex_shader_code,
+    std::span<const std::uint32_t> fragment_shader_code,
     const GraphicsPipelineConfigInfo& config) {
-    auto vertex_shader_code = read_file(vertex_shader_path);
-    auto fragment_shader_code = read_file(fragment_shader_path);
-
     vertex_shader_module = ctx.device->createShaderModuleUnique(
         vk::ShaderModuleCreateInfo({}, vertex_shader_code));
     fragment_shader_module = ctx.device->createShaderModuleUnique(

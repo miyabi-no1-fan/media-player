@@ -1,6 +1,6 @@
 #pragma once
 #include <cstdint>
-#include <string>
+#include <vector>
 #include <vulkan/vulkan.hpp>
 
 #include "context.hpp"
@@ -36,8 +36,8 @@ class GraphicsPipeline {
         const vk::UniquePipelineLayout& pipeline_layout,
         const vk::UniqueRenderPass& render_pass,
         std::uint32_t subpass,
-        const std::string& vertex_shader_path,
-        const std::string& fragment_shader_path,
+        std::span<const std::uint32_t> vertex_shader_code,
+        std::span<const std::uint32_t> fragment_shader_code,
         const GraphicsPipelineConfigInfo& config);
 
     GraphicsPipeline(const GraphicsPipeline&) = delete;

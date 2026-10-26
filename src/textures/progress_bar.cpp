@@ -3,12 +3,22 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vulkan/vulkan.hpp>
 
 #include "buffer.hpp"
 #include "descriptors.hpp"
 #include "pipeline.hpp"
 #include "renderer.hpp"
+
+static constexpr std::uint8_t vertex_shader[] = {
+#embed "../../shaders/dist/progress_bar.vert.spv"
+};
+static constexpr std::uint8_t fragment_shader[] = {
+#embed "../../shaders/dist/progress_bar.frag.spv"
+};
+static_assert(sizeof(vertex_shader) % sizeof(std::uint32_t) == 0);
+static_assert(sizeof(fragment_shader) % sizeof(std::uint32_t) == 0);
 
 namespace aglea {
 
@@ -62,8 +72,12 @@ void ProgressBar::create_pipeline() {
         pipeline_layout,
         renderer.swap_chain->get_render_pass(),
         0,
-        "shaders/dist/progress_bar.vert.spv",
-        "shaders/dist/progress_bar.frag.spv",
+        std::span<const std::uint32_t>(
+            reinterpret_cast<const std::uint32_t*>(vertex_shader),
+            sizeof(vertex_shader) / sizeof(std::uint32_t)),
+        std::span<const std::uint32_t>(
+            reinterpret_cast<const std::uint32_t*>(fragment_shader),
+            sizeof(fragment_shader) / sizeof(std::uint32_t)),
         pipeline_config);
 }
 

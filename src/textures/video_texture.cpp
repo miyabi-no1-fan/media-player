@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <vulkan/vulkan.hpp>
 extern "C" {
@@ -24,6 +25,15 @@ static inline constexpr C div_ceil(const A& a, const B& b) {
 }
 
 namespace aglea {
+
+static constexpr std::uint8_t vertex_shader[] = {
+#embed "../../shaders/dist/shader.vert.spv"
+};
+static constexpr std::uint8_t fragment_shader[] = {
+#embed "../../shaders/dist/shader.frag.spv"
+};
+static_assert(sizeof(vertex_shader) % sizeof(std::uint32_t) == 0);
+static_assert(sizeof(fragment_shader) % sizeof(std::uint32_t) == 0);
 
 void VideoTexture::init() {
     check_supported_features();
@@ -176,8 +186,12 @@ void VideoTexture::create_pipeline() {
         pipeline_layout,
         renderer.swap_chain->get_render_pass(),
         0,
-        "shaders/dist/shader.vert.spv",
-        "shaders/dist/shader.frag.spv",
+        std::span<const std::uint32_t>(
+            reinterpret_cast<const std::uint32_t*>(vertex_shader),
+            sizeof(vertex_shader) / sizeof(std::uint32_t)),
+        std::span<const std::uint32_t>(
+            reinterpret_cast<const std::uint32_t*>(fragment_shader),
+            sizeof(fragment_shader) / sizeof(std::uint32_t)),
         pipeline_config);
 }
 

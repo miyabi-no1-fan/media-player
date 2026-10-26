@@ -4,12 +4,13 @@ import subprocess
 from pathlib import Path
 import shlex
 
+# options: "g++" "clang++"
 CC = "clang++"
 
 # options: "Debug" "Release"
-BUILD_TYPE = "Debug"
+BUILD_TYPE = "Release"
 
-FLAGS = "-Wall -Wextra -Wpedantic -Werror"
+FLAGS = "-Wall -Wextra -Wpedantic -Werror -Wno-c23-extensions"
 
 if BUILD_TYPE == "Release":
     FLAGS += " -DNDEBUG -O2 -march=native -mtune=native"
@@ -31,14 +32,13 @@ def run(cmd: str):
     subprocess.run(shlex.split(cmd))
 
 def main():
-    run(f"cmake -B {BUILD_DIR} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_COMPILER={CC} -DCMAKE_CXX_FLAGS=\"{FLAGS}\" -DCMAKE_BUILD_TYPE={BUILD_TYPE} -DLTO={LTO}")
-    run(f"cmake --build {BUILD_DIR} --config {BUILD_TYPE} -j{THREADS}")
-
     for shader in SHADER_SRC_DIR.rglob('*'):
         if shader.is_file() and not SHADER_BUILD_DIR in shader.parents:
             output = SHADER_BUILD_DIR / shader.relative_to(SHADER_SRC_DIR)
             output.parent.mkdir(parents=True, exist_ok=True)
             run(f"{SHADER_COMPILER} {shader} -o {output}.spv")
+    run(f"cmake -B {BUILD_DIR} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_COMPILER={CC} -DCMAKE_CXX_FLAGS=\"{FLAGS}\" -DCMAKE_BUILD_TYPE={BUILD_TYPE} -DLTO={LTO}")
+    run(f"cmake --build {BUILD_DIR} --config {BUILD_TYPE} -j{THREADS}")
     print("===============================================================================")
 
 if __name__ == "__main__":
