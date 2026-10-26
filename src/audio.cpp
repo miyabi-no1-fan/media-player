@@ -30,6 +30,8 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     const std::int64_t sample_time_us = (static_cast<std::int64_t>(nbuffer_frames) * AV_TIME_BASE) /
                                         static_cast<std::int64_t>(self.sample_rate);
 
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(sample_time_us);
+
     if (paused.load()) {
         std::memset(buffer, 0, needed * sizeof(T));
         return 0;
@@ -38,7 +40,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     auto target_us = self.current_us->fetch_add(sample_time_us);
 
     while (self.queue<T>().size() < needed) {
-        auto res = self.receiver->receive_timeout(std::chrono::microseconds(sample_time_us) * 0.8);
+        auto res = self.receiver->receive_deadline(deadline - std::chrono::microseconds(10));
 
         if (audio_seek_req.load()) {
             // flush

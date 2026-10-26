@@ -62,6 +62,16 @@ class Receiver {
         return std::unexpected(Error::Timeout);
     }
 
+    template <typename D>
+    std::expected<T, Error> receive_deadline(D deadline) {
+        while (std::chrono::steady_clock::now() < deadline) {
+            auto msg = try_receive();
+            if (msg != std::unexpected(Error::Empty)) return msg;
+            std::this_thread::sleep_for(POLLING_INTERVAL);
+        }
+        return std::unexpected(Error::Timeout);
+    }
+
     std::expected<T, Error> receive() {
         while (1) {
             auto msg = try_receive();
