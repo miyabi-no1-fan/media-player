@@ -61,6 +61,7 @@ std::thread Decoder::launch() {
                 ::Packet::Video::sender->drop_connection();
                 ::Packet::Audio::sender->drop_connection();
                 bool should_quit = true;
+                audio_seek_req.wait(true);
                 while (audio_current_us->load() < duration_us()) {
                     if (decoder_seek_req.load()) {
                         should_quit = false;
