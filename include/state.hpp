@@ -62,7 +62,7 @@ extern std::atomic_bool audio_seek_req;
 extern std::atomic_int64_t seek_time_us;
 
 // `seek_req_ok` is set to true by video
-// and set to false by video.
+// and set to false by audio.
 // After decoder and audio finish their seek req
 // audio has to wait until video frames ready to play.
 // Video decoder can be slow and might miss a few frames

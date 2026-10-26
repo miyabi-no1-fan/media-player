@@ -35,22 +35,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         return 0;
     }
 
-    if (!seek_req_ok.load()) {
-        using namespace std::chrono;
-        microseconds timeout(sample_time_us);
-        auto start = std::chrono::steady_clock::now();
-        // this is wait_timeout
-        while (!seek_req_ok.load() &&
-               std::chrono::steady_clock::now() - start < timeout * 0.8) {
-            std::this_thread::sleep_for(microseconds(100));
-        }
-        // pad with silence if timeout
-        if (!seek_req_ok.load()) {
-            std::memset(buffer, 0, needed * sizeof(T));
-            return 0;
-        }
-    }
-
     auto target_us = self.current_us->fetch_add(sample_time_us);
 
     while (self.queue<T>().size() < needed) {
@@ -66,6 +50,9 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
             // seek done
             audio_seek_req.store(false);
             audio_seek_req.notify_one();
+            // wait for video
+            seek_req_ok.store(false);
+            seek_req_ok.wait(false);
             continue;
         }
 

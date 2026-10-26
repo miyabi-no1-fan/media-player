@@ -124,7 +124,7 @@ void Video::seek(std::int64_t target_us) {
     decoder_seek_req.store(true);
     audio_seek_req.store(true);
     audio_seek_req.wait(true);
-    seek_req_ok.store(false);
+    seek_req_ok.wait(true);
 }
 
 bool Video::render() {
@@ -161,7 +161,10 @@ bool Video::render() {
     }
 
     // video frame is ready, so we clear this flag
-    seek_req_ok.store(true);
+    if (!seek_req_ok.load()) {
+        seek_req_ok.store(true);
+        seek_req_ok.notify_one();
+    }
 
     if (!has_video) {
         // We skipped receive because of no video,
