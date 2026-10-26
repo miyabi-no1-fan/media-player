@@ -92,7 +92,6 @@ class Receiver {
         return std::move(*res);
     }
 
-    // resolution = 10 microseconds
     template <typename D>
     std::expected<T, Error> receive_timeout(D duration) {
         auto start = std::chrono::steady_clock::now();
@@ -104,7 +103,6 @@ class Receiver {
         return std::unexpected(Error::Timeout);
     }
 
-    // resolution = 10 microseconds
     std::expected<T, Error> receive() {
         while (1) {
             auto res = try_receive();

@@ -50,7 +50,6 @@ class Receiver {
         return std::move(*res);
     }
 
-    // resolution = 10 microseconds
     template <typename D>
     std::expected<T, Error> receive_timeout(D timeout) {
         auto start = std::chrono::steady_clock::now();
@@ -150,7 +149,6 @@ class Sender {
         return closed = true;
     }
 
-    // resolution = 10 microseconds
     template <typename D>
     std::optional<T> send_timeout(T message, D timeout) {
         auto start = std::chrono::steady_clock::now();
