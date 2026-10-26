@@ -39,7 +39,7 @@ void Video::play() {
             int key_space = glfwGetKey(w, GLFW_KEY_SPACE);
 
             if (key_space == GLFW_PRESS) {
-                if (!key_space_locked) paused.store(!paused.load());
+                if (!key_space_locked) pause();
                 key_space_locked = true;
             }
 
@@ -52,7 +52,7 @@ void Video::play() {
             int click_left = glfwGetMouseButton(w, GLFW_MOUSE_BUTTON_LEFT);
 
             if (click_left == GLFW_PRESS) {
-                if (!click_left_locked) paused.store(!paused.load());
+                if (!click_left_locked) pause();
                 click_left_locked = true;
             }
 
@@ -114,6 +114,15 @@ void Video::play() {
                 show_progress_bar();
             }
         }
+    }
+}
+
+void Video::pause() {
+    if (paused.load()) {
+        paused.store(false);
+    } else {
+        paused.store(true);
+        show_progress_bar();
     }
 }
 

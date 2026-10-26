@@ -58,6 +58,7 @@ class Video {
 
    private:
     bool render();
+    void pause();
     void seek(std::int64_t target_us);
     void get_cursor();
     void hide_cursor();
