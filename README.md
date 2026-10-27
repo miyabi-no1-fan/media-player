@@ -22,3 +22,5 @@ cd media-player
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
+The output binary is `build/media-player`.
+Also keep in mind that dependencies are dynamically linked.
