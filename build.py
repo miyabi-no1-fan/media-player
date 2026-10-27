@@ -28,7 +28,9 @@ SHADER_BUILD_DIR = Path("shaders/dist")
 
 def run(cmd: str):
     print(cmd)
-    subprocess.run(shlex.split(cmd))
+    ret = subprocess.run(shlex.split(cmd))
+    if ret.returncode != 0:
+        exit(ret.returncode)
 
 def main():
     for shader in SHADER_SRC_DIR.rglob('*'):
