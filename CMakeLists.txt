@@ -16,12 +16,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE include)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
-    libavdevice
     libavfilter
     libavformat
     libavcodec
     libswresample
-    libswscale
     libavutil
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBAV)
