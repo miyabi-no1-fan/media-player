@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  ubuntu_build:
+    # https://github.blog/changelog/2026-09-17-ubuntu-26-generally-available-and-latest-migration
+    # should be `ubuntu-latest` after November 19, 2026.
+    runs-on: ubuntu-26.04
+    env:
+      PROJECT: ${{ github.event.repository.name }}
+      ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-ubuntu-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget python3 build-essential pkg-config cmake make glslc \
+            libvulkan-dev libglfw3-dev librtaudio-dev \
+            libavfilter-dev libavformat-dev libavcodec-dev \
+            libswresample-dev libavutil-dev
+          wget https://sdk.lunarg.com/sdk/download/1.4.363.0/linux/vulkansdk-linux-x86_64-1.4.363.0.tar.xz
+          tar -xf vulkansdk-linux-x86_64-1.4.363.0.tar.xz
+          ln -s 1.4.363.0 vulkansdk
+
+      - name: Build
+        shell: bash
+        run: |
+          source vulkansdk/setup-env.sh
+          ./build.py
+
+      - name: Package
+        run: |
+          mkdir "$ARCHIVE"
+          cp ./build/media-player "$ARCHIVE/$PROJECT"
+          tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+          sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-ubuntu
+          path: |
+            ${{ env.ARCHIVE }}.tar.gz
+            ${{ env.ARCHIVE }}.tar.gz.sha256
+
+  archlinux_build:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      PROJECT: ${{ github.event.repository.name }}
+      ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-archlinux-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            base-devel pkgconf cmake make shaderc python llvm clang \
+            vulkan-headers vulkan-icd-loader glfw rtaudio ffmpeg
+
+      - name: Build
+        run: ./build.py
+
+      - name: Package
+        run: |
+          mkdir "$ARCHIVE"
+          cp ./build/media-player "$ARCHIVE/$PROJECT"
+          tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+          sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-arch
+          path: |
+            ${{ env.ARCHIVE }}.tar.gz
+            ${{ env.ARCHIVE }}.tar.gz.sha256
+
+  release:
+    needs: [ubuntu_build, archlinux_build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+          dist/*.tar.gz dist/*.tar.gz.sha256 --clobber
