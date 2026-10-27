@@ -27,9 +27,9 @@ jobs:
             libvulkan-dev libglfw3-dev librtaudio-dev \
             libavfilter-dev libavformat-dev libavcodec-dev \
             libswresample-dev libavutil-dev
-          wget https://sdk.lunarg.com/sdk/download/1.4.363.0/linux/vulkansdk-linux-x86_64-1.4.363.0.tar.xz
-          tar -xf vulkansdk-linux-x86_64-1.4.363.0.tar.xz
-          ln -s 1.4.363.0 vulkansdk
+          wget https://sdk.lunarg.com/sdk/download/1.4.350.0/linux/vulkansdk-linux-x86_64-1.4.350.0.tar.xz
+          tar -xf vulkansdk-linux-x86_64-1.4.350.0.tar.xz
+          ln -s 1.4.350.0 vulkansdk
 
       - name: Build
         shell: bash
