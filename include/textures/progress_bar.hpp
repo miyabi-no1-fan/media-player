@@ -22,6 +22,8 @@
 #include <vulkan/vulkan.hpp>
 
 #include "buffer.hpp"
+#include "descriptors.hpp"
+#include "pipeline.hpp"
 #include "renderer.hpp"
 #include "textures.hpp"
 
@@ -29,6 +31,11 @@ namespace aglea {
 
 class ProgressBar : public Texture {
     Renderer& renderer;
+    std::unique_ptr<GraphicsPipeline> pipeline;
+    vk::UniquePipelineLayout pipeline_layout;
+    std::unique_ptr<DescriptorSetLayout> descriptor_set_layout;
+    std::vector<vk::UniqueDescriptorSet> descriptor_sets;
+
     struct UBO {
         // current / duration
         float progress;

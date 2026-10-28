@@ -42,6 +42,6 @@ const vec2 colors[4] = {
 void main() {
     mat2 transformation = transpose(mat2(_transformation));
     vec2 position = transformation * positions[gl_VertexIndex];
-    gl_Position = vec4(position, 0.5, 1);
+    gl_Position = vec4(position, 0.9, 1);
     frag_color = colors[gl_VertexIndex];
 }

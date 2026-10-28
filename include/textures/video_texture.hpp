@@ -27,8 +27,10 @@ extern "C" {
 }
 
 #include "buffer.hpp"
+#include "descriptors.hpp"
 #include "image.hpp"
 #include "matrix.hpp"
+#include "pipeline.hpp"
 #include "renderer.hpp"
 #include "textures.hpp"
 
@@ -37,6 +39,11 @@ namespace aglea {
 class VideoTexture : public Texture {
    private:
     Renderer& renderer;
+    std::unique_ptr<GraphicsPipeline> pipeline;
+    vk::UniquePipelineLayout pipeline_layout;
+    std::unique_ptr<DescriptorSetLayout> descriptor_set_layout;
+    std::vector<vk::UniqueDescriptorSet> descriptor_sets;
+
     std::uint32_t width;
     std::uint32_t height;
 
