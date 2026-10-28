@@ -28,7 +28,7 @@
 #include <limits>
 #include <memory>
 #include <thread>
-#define GLFW_INCLUDE_VULKAN
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 extern "C" {
 #include <libavutil/avutil.h>
