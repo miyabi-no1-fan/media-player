@@ -11,7 +11,6 @@ Open an issue if you want support on your platform.
 - Vulkan
 - FFmpeg
 
-
 ## Install
 ```bash
 git clone https://github.com/miyabi-no1-fan/media-player.git
