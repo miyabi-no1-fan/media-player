@@ -7,13 +7,15 @@ on:
 permissions:
   contents: write
 
+env:
+  PROJECT: ${{ github.event.repository.name }}
+
 jobs:
   ubuntu_build:
     # https://github.blog/changelog/2026-09-17-ubuntu-26-generally-available-and-latest-migration
     # should be `ubuntu-latest` after November 19, 2026.
     runs-on: ubuntu-26.04
     env:
-      PROJECT: ${{ github.event.repository.name }}
       ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-ubuntu-x86_64
     steps:
       - name: Checkout
@@ -40,7 +42,7 @@ jobs:
       - name: Package
         run: |
           mkdir "$ARCHIVE"
-          cp ./build/media-player "$ARCHIVE/$PROJECT"
+          cp "build/$PROJECT" "$ARCHIVE"
           tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
 
@@ -56,7 +58,6 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     env:
-      PROJECT: ${{ github.event.repository.name }}
       ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-archlinux-x86_64
     steps:
       - name: Checkout
@@ -74,7 +75,7 @@ jobs:
       - name: Package
         run: |
           mkdir "$ARCHIVE"
-          cp ./build/media-player "$ARCHIVE/$PROJECT"
+          cp "build/$PROJECT" "$ARCHIVE"
           tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
 
@@ -86,8 +87,74 @@ jobs:
             ${{ env.ARCHIVE }}.tar.gz
             ${{ env.ARCHIVE }}.tar.gz.sha256
 
+  windows_build:
+    runs-on: windows-latest
+    env:
+      ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-windows-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3"
+
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full-shared.7z" -OutFile ffmpeg.7z
+          7z x ffmpeg.7z -oC:\ffmpeg
+          $dir = (Get-ChildItem C:\ffmpeg -Directory)[0].FullName
+          echo "$dir\bin" >> $env:GITHUB_PATH
+          echo "FFMPEG_DIR=$dir" >> $env:GITHUB_ENV
+          echo "INCLUDE=$dir\include" >> $env:GITHUB_ENV
+          echo "LIB=$dir\lib" >> $env:GITHUB_ENV
+
+      - name: Install RtAudio and GLFW
+        shell: pwsh
+        run: vcpkg install rtaudio glfw3 --triplet x64-windows
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          winget install --id KhronosGroup.VulkanSDK -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+          $sdk = Get-ChildItem C:\VulkanSDK -Directory |
+                 Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+          "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$($sdk.FullName)\Bin"        | Out-File -FilePath $env:GITHUB_PATH -Append
+          Write-Host "Vulkan SDK: $($sdk.Name)"
+
+      - name: Build
+        shell: cmd
+        env:
+          CMAKE_GENERATOR: Ninja
+          CMAKE_PREFIX_PATH: C:\vcpkg\installed\x64-windows
+        run: |
+          for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSROOT=%%i"
+          call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
+          set "PATH=C:\Program Files\LLVM\bin;%PATH%"
+          python build.py
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p "$ARCHIVE"
+          cp "build/$PROJECT" "$ARCHIVE/"
+          tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+          sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: |
+            ${{ env.ARCHIVE }}.tar.gz
+            ${{ env.ARCHIVE }}.tar.gz.sha256
+
+
   release:
-    needs: [ubuntu_build, archlinux_build]
+    needs: [ubuntu_build, archlinux_build,windows_build]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

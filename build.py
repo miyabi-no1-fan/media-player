@@ -37,7 +37,7 @@ def main():
         if shader.is_file() and not SHADER_BUILD_DIR in shader.parents:
             output = SHADER_BUILD_DIR / shader.relative_to(SHADER_SRC_DIR)
             output.parent.mkdir(parents=True, exist_ok=True)
-            run(f"{SHADER_COMPILER} {shader} -o {output}.spv")
+            run(f"{SHADER_COMPILER} {shader.as_posix()} -o {output.as_posix()}.spv")
     run(f"cmake -B {BUILD_DIR} -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_COMPILER={CC} -DCMAKE_CXX_FLAGS=\"{FLAGS}\" -DCMAKE_BUILD_TYPE={BUILD_TYPE} -DLTO={LTO}")
     run(f"cmake --build {BUILD_DIR} --config {BUILD_TYPE} -j{os.process_cpu_count()}")
     print("===============================================================================")

@@ -14,15 +14,27 @@ add_executable(${PROJECT_NAME} ${SRC})
 
 target_include_directories(${PROJECT_NAME} PRIVATE include)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
-    libavfilter
-    libavformat
-    libavcodec
-    libswresample
-    libavutil
-)
-target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBAV)
+if(WIN32)
+    set(FFMPEG_ROOT "$ENV{FFMPEG_DIR}")
+    target_include_directories(${PROJECT_NAME} PRIVATE "${FFMPEG_ROOT}/include")
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        "${FFMPEG_ROOT}/lib/avcodec.lib"
+        "${FFMPEG_ROOT}/lib/avformat.lib"
+        "${FFMPEG_ROOT}/lib/avutil.lib"
+        "${FFMPEG_ROOT}/lib/avfilter.lib"
+        "${FFMPEG_ROOT}/lib/swresample.lib"
+    )
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
+        libavfilter
+        libavformat
+        libavcodec
+        libswresample
+        libavutil
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBAV)
+endif()
 
 find_package(RtAudio QUIET)
 if(RtAudio_FOUND)
