@@ -8,10 +8,7 @@ Other platforms might still work, but never tested.
 Open an issue if you want support on your platform.
 
 ## Dependencies
-- Vulkan: 1.0 or newer
-- Vulkan SDK: 1.4.350 or newer
-- GLFW: 3.2 or newer
-- RtAudio: 6.0 or newer
+- Vulkan
 - FFmpeg
 
 

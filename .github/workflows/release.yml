@@ -25,10 +25,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            wget python3 build-essential pkg-config cmake make glslc \
-            libvulkan-dev libglfw3-dev librtaudio-dev \
-            libavfilter-dev libavformat-dev libavcodec-dev \
-            libswresample-dev libavutil-dev
+            wget python3 build-essential pkg-config cmake make \
+            libwayland-dev wayland-protocols libxkbcommon-dev xorg-dev \
+            libasound2-dev libpulse-dev libjack-jackd2-dev \
+            libvulkan-dev libavfilter-dev libavformat-dev \
+            libavcodec-dev libswresample-dev libavutil-dev
           wget https://sdk.lunarg.com/sdk/download/1.4.350.0/linux/vulkansdk-linux-x86_64-1.4.350.0.tar.xz
           tar -xf vulkansdk-linux-x86_64-1.4.350.0.tar.xz
           ln -s 1.4.350.0 vulkansdk
@@ -66,8 +67,10 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm \
-            base-devel pkgconf cmake make shaderc python llvm clang \
-            vulkan-headers vulkan-icd-loader glfw rtaudio ffmpeg
+            base-devel git pkgconf cmake make shaderc python llvm clang \
+            wayland wayland-protocols libxkbcommon libx11 libxrandr libxinerama libxcursor libxi \
+            alsa-lib libpulse jack2 \
+            vulkan-headers vulkan-icd-loader ffmpeg
 
       - name: Build
         run: ./build.py
@@ -96,9 +99,9 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
-          python-version: "3"
+          python-version: "3.14"
 
       - name: Install FFmpeg
         shell: pwsh
@@ -111,10 +114,6 @@ jobs:
           echo "INCLUDE=$dir\include" >> $env:GITHUB_ENV
           echo "LIB=$dir\lib" >> $env:GITHUB_ENV
 
-      - name: Install RtAudio and GLFW
-        shell: pwsh
-        run: vcpkg install rtaudio glfw3 --triplet x64-windows
-
       - name: Install Vulkan SDK
         shell: pwsh
         run: |
@@ -123,17 +122,14 @@ jobs:
                  Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
           "VULKAN_SDK=$($sdk.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
           "$($sdk.FullName)\Bin"        | Out-File -FilePath $env:GITHUB_PATH -Append
-          Write-Host "Vulkan SDK: $($sdk.Name)"
 
       - name: Build
         shell: cmd
         env:
           CMAKE_GENERATOR: Ninja
-          CMAKE_PREFIX_PATH: C:\vcpkg\installed\x64-windows
         run: |
           for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSROOT=%%i"
           call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
-          set "PATH=C:\Program Files\LLVM\bin;%PATH%"
           python build.py
 
       - name: Package
