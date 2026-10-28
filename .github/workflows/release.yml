@@ -55,6 +55,42 @@ jobs:
             ${{ env.ARCHIVE }}.tar.gz
             ${{ env.ARCHIVE }}.tar.gz.sha256
 
+  fedora_build:
+    runs-on: ubuntu-latest
+    container: fedora:45 # should be `fedora:latest` after November 3, 2026.
+    env:
+      ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-fedora-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            @development-tools git pkgconf-pkg-config cmake make glslc python3 llvm clang \
+            wayland-devel wayland-protocols-devel libxkbcommon-devel libX11-devel \
+            libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel \
+            alsa-lib-devel pulseaudio-libs-devel jack-audio-connection-kit-devel \
+            vulkan-headers vulkan-loader-devel ffmpeg-free-devel
+
+      - name: Build
+        run: ./build.py
+
+      - name: Package
+        run: |
+          mkdir "$ARCHIVE"
+          cp "build/$PROJECT" "$ARCHIVE"
+          tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+          sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-fedora
+          path: |
+            ${{ env.ARCHIVE }}.tar.gz
+            ${{ env.ARCHIVE }}.tar.gz.sha256
+
   archlinux_build:
     runs-on: ubuntu-latest
     container: archlinux:latest
@@ -150,7 +186,7 @@ jobs:
 
 
   release:
-    needs: [ubuntu_build, archlinux_build,windows_build]
+    needs: [ ubuntu_build, fedora_build, archlinux_build, windows_build ]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
