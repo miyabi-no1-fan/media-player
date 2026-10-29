@@ -14,10 +14,10 @@ BUILD_TYPE = "Release"
 FLAGS = "-Wall -Wextra -Wpedantic -Werror -Wno-c23-extensions"
 
 if BUILD_TYPE == "Release":
-    FLAGS += " -DNDEBUG -O2 -march=x86-64 -mtune=x86-64"
+    FLAGS = f"{FLAGS} -DNDEBUG -O2 -march=x86-64 -mtune=x86-64"
     LTO = "ON"
 elif BUILD_TYPE == "Debug":
-    FLAGS += " -g -Og -fno-omit-frame-pointer -fsanitize=address,undefined"
+    FLAGS = f"{FLAGS} -g -Og -fno-omit-frame-pointer -fsanitize=address,undefined"
     LTO = "OFF"
 
 GENERATOR = None
