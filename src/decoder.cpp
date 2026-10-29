@@ -26,6 +26,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <string>
 #include <thread>
 #include <utility>
 extern "C" {
@@ -41,6 +42,7 @@ extern "C" {
 #include <libavutil/mathematics.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
+#include <libavutil/rational.h>
 #include <libswresample/swresample.h>
 }
 
@@ -182,7 +184,11 @@ std::thread Decoder::launch_video_decoder() const {
             Frame decoded = av_frame_alloc();
             auto receive_franes = [&]() {
                 while (avcodec_receive_frame(video->decoder, decoded.frame) >= 0) {
-                    if (!filter->graph) init_filters();
+                    if (!filter->graph)
+                        init_filters(*filter,
+                                     *video,
+                                     ictx->streams[video->stream_index]->time_base,
+                                     filter_descr);
 
                     std::int64_t target_us;
                     if (!audio_seek_req.load()) target_us = audio_current_us->load();
@@ -282,7 +288,7 @@ std::thread Decoder::launch_audio_decoder() const {
 
                     if (decoded.frame->pts >= target_ts) {
                         if (audio->swr) {
-                            auto out = resample_audio(decoded.frame);
+                            auto out = resample_audio(*audio, decoded.frame);
                             out.frame->pts = decoded.frame->best_effort_timestamp;
                             send(std::move(out));
                         } else {
@@ -313,7 +319,7 @@ std::thread Decoder::launch_audio_decoder() const {
 
             if (audio->swr) {
                 while (1) {
-                    auto out = resample_audio(nullptr);
+                    auto out = resample_audio(*audio, nullptr);
                     out.frame->pts = decoded.frame->best_effort_timestamp;
                     if (out.frame->nb_samples == 0) break;
                     send(std::move(out));
@@ -329,14 +335,14 @@ std::thread Decoder::launch_audio_decoder() const {
     });
 }
 
-Decoder::Frame Decoder::resample_audio(const AVFrame* input) const {
+Decoder::Frame Decoder::resample_audio(const Decoder::AudioStream& audio, const AVFrame* input) {
     Frame out = av_frame_alloc();
     int64_t sample_rate;
-    TRY(av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate));
+    TRY(av_opt_get_int(audio.swr, "out_sample_rate", 0, &sample_rate));
     out.frame->sample_rate = static_cast<int>(sample_rate);
-    TRY(av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, (AVSampleFormat*)&out.frame->format));
-    TRY(av_opt_get_chlayout(audio->swr, "out_chlayout", 0, &out.frame->ch_layout));
-    TRY(swr_convert_frame(audio->swr, out.frame, input));
+    TRY(av_opt_get_sample_fmt(audio.swr, "out_sample_fmt", 0, (AVSampleFormat*)&out.frame->format));
+    TRY(av_opt_get_chlayout(audio.swr, "out_chlayout", 0, &out.frame->ch_layout));
+    TRY(swr_convert_frame(audio.swr, out.frame, input));
     return out;
 }
 
@@ -368,17 +374,19 @@ void Decoder::discard_unused_streams(const std::set<AVMediaType> used_streams) {
 }
 
 // copy from https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c
-int Decoder::init_filters() const {
+int Decoder::init_filters(Decoder::Filter& filter,
+                          const Decoder::VideoStream& video,
+                          AVRational time_base,
+                          const std::string& filter_descr) {
     char args[512];
     int ret = 0;
     const AVFilter* buffersrc = avfilter_get_by_name("buffer");
     const AVFilter* buffersink = avfilter_get_by_name("buffersink");
     AVFilterInOut* outputs = avfilter_inout_alloc();
     AVFilterInOut* inputs = avfilter_inout_alloc();
-    AVRational time_base = ictx->streams[video->stream_index]->time_base;
 
-    filter->graph = avfilter_graph_alloc();
-    if (!outputs || !inputs || !filter->graph) {
+    filter.graph = avfilter_graph_alloc();
+    if (!outputs || !inputs || !filter.graph) {
         ret = AVERROR(ENOMEM);
         goto end;
     }
@@ -387,37 +395,37 @@ int Decoder::init_filters() const {
     snprintf(args,
              sizeof(args),
              "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:colorspace=%s:range=%s",
-             video->decoder->width,
-             video->decoder->height,
-             video->decoder->pix_fmt,
+             video.decoder->width,
+             video.decoder->height,
+             video.decoder->pix_fmt,
              time_base.num,
              time_base.den,
-             video->decoder->sample_aspect_ratio.num,
-             video->decoder->sample_aspect_ratio.den,
-             av_color_space_name(video->decoder->colorspace),
-             av_color_range_name(video->decoder->color_range));
+             video.decoder->sample_aspect_ratio.num,
+             video.decoder->sample_aspect_ratio.den,
+             av_color_space_name(video.decoder->colorspace),
+             av_color_range_name(video.decoder->color_range));
 
-    ret = avfilter_graph_create_filter(&filter->buffersrc_ctx, buffersrc, "in", args, NULL, filter->graph);
+    ret = avfilter_graph_create_filter(&filter.buffersrc_ctx, buffersrc, "in", args, NULL, filter.graph);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
         goto end;
     }
 
     /* buffer video sink: to terminate the filter chain. */
-    filter->buffersink_ctx = avfilter_graph_alloc_filter(filter->graph, buffersink, "out");
-    if (!filter->buffersink_ctx) {
+    filter.buffersink_ctx = avfilter_graph_alloc_filter(filter.graph, buffersink, "out");
+    if (!filter.buffersink_ctx) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
         ret = AVERROR(ENOMEM);
         goto end;
     }
 
-    ret = av_opt_set(filter->buffersink_ctx, "pixel_formats", pixel_format, AV_OPT_SEARCH_CHILDREN);
+    ret = av_opt_set(filter.buffersink_ctx, "pixel_formats", pixel_format, AV_OPT_SEARCH_CHILDREN);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
         goto end;
     }
 
-    ret = avfilter_init_dict(filter->buffersink_ctx, NULL);
+    ret = avfilter_init_dict(filter.buffersink_ctx, NULL);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot initialize buffer sink\n");
         goto end;
@@ -435,7 +443,7 @@ int Decoder::init_filters() const {
      * default.
      */
     outputs->name = av_strdup("in");
-    outputs->filter_ctx = filter->buffersrc_ctx;
+    outputs->filter_ctx = filter.buffersrc_ctx;
     outputs->pad_idx = 0;
     outputs->next = NULL;
 
@@ -446,14 +454,14 @@ int Decoder::init_filters() const {
      * default.
      */
     inputs->name = av_strdup("out");
-    inputs->filter_ctx = filter->buffersink_ctx;
+    inputs->filter_ctx = filter.buffersink_ctx;
     inputs->pad_idx = 0;
     inputs->next = NULL;
 
-    if ((ret = avfilter_graph_parse_ptr(filter->graph, filter_descr.c_str(), &inputs, &outputs, NULL)) < 0)
+    if ((ret = avfilter_graph_parse_ptr(filter.graph, filter_descr.c_str(), &inputs, &outputs, NULL)) < 0)
         goto end;
 
-    if ((ret = avfilter_graph_config(filter->graph, NULL)) < 0)
+    if ((ret = avfilter_graph_config(filter.graph, NULL)) < 0)
         goto end;
 
 end:

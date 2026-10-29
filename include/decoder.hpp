@@ -28,6 +28,7 @@ extern "C" {
 #include <libavutil/log.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/rational.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 }
@@ -304,8 +305,8 @@ class Decoder {
     };
 
    private:
-    int init_filters() const;
+    static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);
     std::thread launch_video_decoder() const;
     std::thread launch_audio_decoder() const;
-    Frame resample_audio(const AVFrame* input) const;
+    static Frame resample_audio(const AudioStream& audio, const AVFrame* input);
 };
