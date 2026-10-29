@@ -39,7 +39,7 @@ else()
     target_link_libraries(${PROJECT_NAME} PRIVATE PkgConfig::LIBAV)
 endif()
 
-find_package(Vulkan REQUIRED) # require Vulkan SDK 1.4.350 or newer
+find_package(Vulkan REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan)
 
 include(FetchContent)
