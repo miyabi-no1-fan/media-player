@@ -161,8 +161,6 @@ jobs:
 
       - name: Build
         shell: cmd
-        env:
-          CMAKE_GENERATOR: Ninja
         run: |
           for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSROOT=%%i"
           call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
