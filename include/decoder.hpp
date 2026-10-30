@@ -127,6 +127,7 @@ class Decoder {
                 &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
                 0, nullptr);
             // clang-format on
+            swr_init(swr);
         }
         AudioStream(AudioStream&& o) noexcept : Stream(std::move(o)), swr(std::exchange(o.swr, nullptr)) {}
         ~AudioStream() { swr_free(&swr); }
@@ -262,7 +263,7 @@ class Decoder {
 
     std::optional<int> output_sample_rate() const {
         if (!audio) return std::nullopt;
-        if (audio) {
+        if (audio->swr) {
             int64_t sample_rate;
             av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
             return static_cast<int>(sample_rate);
@@ -272,7 +273,7 @@ class Decoder {
 
     std::optional<AVSampleFormat> output_sample_format() const {
         if (!audio) return std::nullopt;
-        if (audio) {
+        if (audio->swr) {
             AVSampleFormat fmt;
             av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, &fmt);
             return fmt;
