@@ -84,7 +84,7 @@ void Video::play() {
 
             if (key_right == GLFW_PRESS) {
                 auto target_us = std::clamp(
-                    audio_current_us->load() + 10 * AV_TIME_BASE,
+                    global_current_us() + 10 * AV_TIME_BASE,
                     std::int64_t(0),
                     duration_us);
                 seek(target_us);
@@ -98,7 +98,7 @@ void Video::play() {
 
             if (key_left == GLFW_PRESS) {
                 auto target_us = std::clamp(
-                    audio_current_us->load() - 10 * AV_TIME_BASE,
+                    global_current_us() - 10 * AV_TIME_BASE,
                     std::int64_t(0),
                     duration_us);
                 seek(target_us);
@@ -136,8 +136,8 @@ void Video::pause() {
 
 void Video::seek(std::int64_t target_us) {
     paused.store(false);
-    audio_current_us = nullptr;
     seek_time_us.store(target_us);
+    audio_current_us.store(nullptr);
     decoder_seek_req.store(true);
     audio_seek_req.store(true);
     audio_seek_req.wait(true);
@@ -163,7 +163,7 @@ bool Video::render() {
             if (!pts_offset) pts_offset = pts;
             else pts -= *pts_offset;
 
-            std::int64_t target = audio_current_us->load();
+            std::int64_t target = global_current_us();
 
             if (pts < target - frame_time_us) {
                 // underrun
@@ -172,7 +172,7 @@ bool Video::render() {
                 // overrun
                 while (pts > target + frame_time_us) {
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    target = audio_current_us->load();
+                    target = global_current_us();
                 }
                 decoded = std::move(*res);
                 break;
@@ -193,13 +193,13 @@ bool Video::render() {
         // We skipped receive because of no video,
         // so we won't receive any EndOfInput signal from decoder.
         // This is the fallback
-        if (audio_current_us->load() >= duration_us) return false;
+        if (global_current_us() >= duration_us) return false;
     }
 
     float progress =
         (should_hide_progress_bar)
             ? 0.f
-            : static_cast<float>(audio_current_us->load()) / static_cast<float>(duration_us);
+            : static_cast<float>(global_current_us()) / static_cast<float>(duration_us);
 
     if (decoded.frame == nullptr &&
         !window.was_window_resized() &&

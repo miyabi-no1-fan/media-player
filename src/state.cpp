@@ -24,7 +24,7 @@
 #include "ringbuf.hpp"
 #include "spsc.hpp"
 
-std::shared_ptr<std::atomic_int64_t> audio_current_us = nullptr;
+std::atomic<std::shared_ptr<std::atomic_int64_t>> audio_current_us = nullptr;
 std::atomic_bool paused = false;
 std::atomic_bool seek_available = false;
 std::atomic_bool decoder_seek_req = false;
@@ -32,8 +32,16 @@ std::atomic_bool audio_seek_req = false;
 std::atomic_int64_t seek_time_us = 0;
 std::atomic_bool seek_req_ok = false;
 
+std::int64_t global_current_us() {
+    if (auto current_us = audio_current_us.load()) return current_us->load();
+    else return seek_time_us.load();
+    // Video thread will set `audio_current_us` to nullptr in a seek req,
+    // so `seek_time_us` is the fallback.
+    // Video thread must set `seek_time_us` before clear the `audio_current_us`.
+}
+
 void new_state() {
-    audio_current_us = std::make_shared<std::atomic_int64_t>(0);
+    audio_current_us.store(nullptr);
     paused.store(false);
     seek_available.store(false);
     decoder_seek_req.store(false);

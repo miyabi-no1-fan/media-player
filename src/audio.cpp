@@ -63,18 +63,13 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         auto res = self.receiver->receive_deadline(deadline - std::chrono::microseconds(10));
 
         if (audio_seek_req.load()) {
-            // flush
-            self.queue<T>().clear();
-            // create new state
-            self.new_state();
-            // update clock
-            self.current_us->store(seek_time_us.load());
-            // seek done
-            audio_seek_req.store(false);
+            self.queue<T>().clear();                      // flush
+            self.new_state();                             // update state
+            self.current_us->store(seek_time_us.load());  // update clock
+            audio_seek_req.store(false);                  // seek done
             audio_seek_req.notify_all();
-            // wait for video
-            seek_req_ok.store(false);
-            seek_req_ok.wait(false);
+            seek_req_ok.store(false);  // signal video, audio is waiting
+            seek_req_ok.wait(false);   // wait for video
             continue;
         }
 
@@ -146,9 +141,8 @@ void Audio::play() {
 }
 
 void Audio::new_state() {
-    audio_current_us = std::make_shared<std::atomic_int64_t>(0);
+    audio_current_us.store(std::make_shared<std::atomic_int64_t>(0));
     current_us = audio_current_us;
-    // wait til channels are valid
-    decoder_seek_req.wait(true);
-    receiver = Frame::Audio::receiver;
+    decoder_seek_req.wait(true);        // wait til channels are valid
+    receiver = Frame::Audio::receiver;  // new receiver
 }

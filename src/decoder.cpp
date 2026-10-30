@@ -79,8 +79,7 @@ std::thread Decoder::launch() {
                 ::Packet::Video::sender->drop_connection();
                 ::Packet::Audio::sender->drop_connection();
                 bool should_quit = true;
-                audio_seek_req.wait(true);
-                while (audio_current_us->load() < duration_us()) {
+                while (global_current_us() < duration_us()) {
                     if (decoder_seek_req.load()) {
                         should_quit = false;
                         break;
@@ -190,12 +189,8 @@ std::thread Decoder::launch_video_decoder() const {
                                      ictx->streams[video->stream_index]->time_base,
                                      filter_descr);
 
-                    std::int64_t target_us;
-                    if (!audio_seek_req.load()) target_us = audio_current_us->load();
-                    else target_us = seek_time_us.load();
-
                     std::int64_t target_ts = av_rescale_q(
-                        target_us,
+                        global_current_us(),
                         AV_TIME_BASE_Q,
                         ictx->streams[video->stream_index]->time_base);
 
@@ -275,12 +270,8 @@ std::thread Decoder::launch_audio_decoder() const {
             Frame decoded = av_frame_alloc();
             auto receive_franes = [&]() {
                 while (avcodec_receive_frame(audio->decoder, decoded.frame) >= 0) {
-                    std::int64_t target_us;
-                    if (!audio_seek_req.load()) target_us = audio_current_us->load();
-                    else target_us = seek_time_us.load();
-
                     std::int64_t target_ts = av_rescale_q(
-                        target_us,
+                        global_current_us(),
                         AV_TIME_BASE_Q,
                         ictx->streams[audio->stream_index]->time_base);
 

@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -33,7 +34,7 @@ class Audio {
     unsigned int sample_rate;
     std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver = nullptr;
     std::shared_ptr<std::atomic_int64_t> current_us = nullptr;
-    std::optional<std::atomic_int64_t> pts_offset = 0;
+    std::optional<std::atomic_int64_t> pts_offset = std::nullopt;
 
     std::variant<
         std::vector<float>,

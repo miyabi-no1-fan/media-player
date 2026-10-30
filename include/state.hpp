@@ -32,7 +32,8 @@
 // 2 sub-decode threads (audio and video) -- the frame producers
 
 // "master clock", create and manually counted by audio thread.
-extern std::shared_ptr<std::atomic_int64_t> audio_current_us;
+extern std::atomic<std::shared_ptr<std::atomic_int64_t>> audio_current_us;
+std::int64_t global_current_us();
 
 // Video thread should always use the latest channels.
 // Main decoder thread should always use the latest channels.
@@ -46,6 +47,10 @@ extern std::shared_ptr<std::atomic_int64_t> audio_current_us;
 // if `seek_req_ok == true`, `audio_seek_req` = false.
 
 // So a seek chain is
+// `seek_time_us`, set by video.
+// `audio_current_us`, set nullptr by video.
+// -- `global_current_us` will use `seek_time_us` as fallback
+// while `audio_current_us` == nullptr.
 // `decoder_seek_req`, set true by video, audio wait for false.
 // `audio_seek_req`, set true by video, video wait for false.
 // `seek_req_ok`, set false by video, audio wait for true.
