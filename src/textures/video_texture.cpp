@@ -321,10 +321,10 @@ void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
 
         std::size_t height = std::min(
             static_cast<std::size_t>(image_planes[i][p]->get_extent().height),
-            static_cast<std::size_t>(p > 0 ? frame->height / 2 : frame->height));
+            static_cast<std::size_t>(p > 0 ? div_ceil(frame->height, 2) : frame->height));
         std::size_t width = std::min(
             static_cast<std::size_t>(image_planes[i][p]->get_extent().width),
-            static_cast<std::size_t>(p > 0 ? frame->width / 2 : frame->width));
+            static_cast<std::size_t>(p > 0 ? div_ceil(frame->width, 2) : frame->width));
 
         for (std::size_t i = 0; i < height; i++) {
             std::memcpy(dst + i * dst_pitch,
