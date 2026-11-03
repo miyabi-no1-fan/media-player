@@ -26,5 +26,5 @@ layout(set = 0, binding = 0, std140) uniform UBO {
 
 void main() {
     if (color > progress) discard;
-    out_color = vec4(255, 0, 0, 1);
+    out_color = vec4(1, 0, 0, 1);
 }
