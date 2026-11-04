@@ -145,8 +145,8 @@ std::thread Decoder::launch() {
         if (video_thrd.joinable()) video_thrd.join();
         if (audio_thrd.joinable()) audio_thrd.join();
 
-        if (video) ::Frame::Video::sender->send_eof();
-        if (audio) ::Frame::Audio::sender->send_eof();
+        if (video) ::Frame::Video::sender->drop_connection();
+        if (audio) ::Frame::Audio::sender->drop_connection();
     });
 }
 
