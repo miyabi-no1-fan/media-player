@@ -54,16 +54,16 @@ void new_state() {
 
 namespace Packet {
 namespace Video {
-std::shared_ptr<SPSC::Sender<Decoder::Packet>> sender = nullptr;
-std::shared_ptr<SPSC::Receiver<Decoder::Packet>> receiver = nullptr;
+std::shared_ptr<SPSC::Sender<UniqueAVPacket>> sender = nullptr;
+std::shared_ptr<SPSC::Receiver<UniqueAVPacket>> receiver = nullptr;
 }  // namespace Video
 namespace Audio {
-std::shared_ptr<SPSC::Sender<Decoder::Packet>> sender = nullptr;
-std::shared_ptr<SPSC::Receiver<Decoder::Packet>> receiver = nullptr;
+std::shared_ptr<SPSC::Sender<UniqueAVPacket>> sender = nullptr;
+std::shared_ptr<SPSC::Receiver<UniqueAVPacket>> receiver = nullptr;
 }  // namespace Audio
 void new_channels() {
     using namespace SPSC;
-    using T = Decoder::Packet;
+    using T = UniqueAVPacket;
     {
         auto [s, r] = unbounded_channel<T>();
         Packet::Video::sender = std::make_shared<Sender<T>>(std::move(s));
@@ -79,20 +79,20 @@ void new_channels() {
 
 namespace Frame {
 namespace Video {
-std::shared_ptr<RingBuf::Sender<Decoder::Frame>> sender;
-std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver;
+std::shared_ptr<RingBuf::Sender<UniqueAVFrame>> sender;
+std::shared_ptr<RingBuf::Receiver<UniqueAVFrame>> receiver;
 }  // namespace Video
 namespace Audio {
-std::shared_ptr<RingBuf::Sender<Decoder::Frame>> sender;
-std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver;
+std::shared_ptr<RingBuf::Sender<UniqueAVFrame>> sender;
+std::shared_ptr<RingBuf::Receiver<UniqueAVFrame>> receiver;
 }  // namespace Audio
 void new_channels() {
     using namespace RingBuf;
-    using T = Decoder::Frame;
+    using T = UniqueAVFrame;
     {
         auto [s, r] = bounded_channel<T>(Video::CONCURRENT_LIMIT);
         Frame::Video::sender = std::make_shared<Sender<T>>(std::move(s));
-        Frame::Video::receiver = std::make_shared<Receiver<Decoder::Frame>>(std::move(r));
+        Frame::Video::receiver = std::make_shared<Receiver<T>>(std::move(r));
     }
     {
         auto [s, r] = RingBuf::bounded_channel<T>(Audio::CONCURRENT_LIMIT);
