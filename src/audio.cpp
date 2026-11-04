@@ -75,7 +75,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
 
         if (!res) break;
 
-        auto* frame = res->frame;
+        UniqueAVFrame frame = std::move(*res);
         assert(frame);
         assert(static_cast<unsigned int>(frame->ch_layout.nb_channels) == self.channels);
 
