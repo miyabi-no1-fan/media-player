@@ -92,13 +92,13 @@ void new_state();
 namespace Packet {
 namespace Video {
 static constexpr int SOFT_LIMIT = 10;
-extern std::shared_ptr<SPSC::Sender<UniqueAVPacket>> sender;
-extern std::shared_ptr<SPSC::Receiver<UniqueAVPacket>> receiver;
+extern std::shared_ptr<SPSC::Sender<Decoder::Packet>> sender;
+extern std::shared_ptr<SPSC::Receiver<Decoder::Packet>> receiver;
 }  // namespace Video
 namespace Audio {
 static constexpr int SOFT_LIMIT = 10;
-extern std::shared_ptr<SPSC::Sender<UniqueAVPacket>> sender;
-extern std::shared_ptr<SPSC::Receiver<UniqueAVPacket>> receiver;
+extern std::shared_ptr<SPSC::Sender<Decoder::Packet>> sender;
+extern std::shared_ptr<SPSC::Receiver<Decoder::Packet>> receiver;
 }  // namespace Audio
 void new_channels();
 }  // namespace Packet
@@ -106,13 +106,13 @@ void new_channels();
 namespace Frame {
 namespace Video {
 static constexpr int CONCURRENT_LIMIT = 10;
-extern std::shared_ptr<RingBuf::Sender<UniqueAVFrame>> sender;
-extern std::shared_ptr<RingBuf::Receiver<UniqueAVFrame>> receiver;
+extern std::shared_ptr<RingBuf::Sender<Decoder::Frame>> sender;
+extern std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver;
 }  // namespace Video
 namespace Audio {
 static constexpr int CONCURRENT_LIMIT = 10;
-extern std::shared_ptr<RingBuf::Sender<UniqueAVFrame>> sender;
-extern std::shared_ptr<RingBuf::Receiver<UniqueAVFrame>> receiver;
+extern std::shared_ptr<RingBuf::Sender<Decoder::Frame>> sender;
+extern std::shared_ptr<RingBuf::Receiver<Decoder::Frame>> receiver;
 }  // namespace Audio
 void new_channels();
 }  // namespace Frame

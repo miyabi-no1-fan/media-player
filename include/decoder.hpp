@@ -58,17 +58,6 @@ inline RtAudioFormat rt_audio_format(const AVSampleFormat& format) {
 // output pixels format for the FFmpeg filter
 static constexpr const char* pixel_format = "yuv420p";
 
-struct AVPacketDeleter {
-    void operator()(AVPacket* p) const { av_packet_free(&p); }
-};
-
-struct AVFrameDeleter {
-    void operator()(AVFrame* f) const { av_frame_free(&f); }
-};
-
-using UniqueAVFrame = std::unique_ptr<AVFrame, AVFrameDeleter>;
-using UniqueAVPacket = std::unique_ptr<AVPacket, AVPacketDeleter>;
-
 class Decoder {
     AVFormatContext* ictx = nullptr;
 
@@ -183,6 +172,27 @@ class Decoder {
     void no_video() { video = nullptr; }
     void no_audio() { audio = nullptr; }
 
+    struct Frame {
+        AVFrame* frame = nullptr;
+        Frame() { frame = nullptr; }
+        Frame(AVFrame* f) : frame(f) {}
+        ~Frame() { av_frame_free(&frame); }
+        Frame(const Frame&) = delete;
+        Frame& operator=(const Frame&) = delete;
+        Frame(Frame&& o) {
+            frame = o.frame;
+            o.frame = nullptr;
+        }
+        Frame& operator=(Frame&& o) {
+            if (frame != nullptr) {
+                av_frame_free(&frame);
+            }
+            frame = o.frame;
+            o.frame = nullptr;
+            return *this;
+        }
+    };
+
     std::thread launch();
 
     ~Decoder() {
@@ -275,9 +285,29 @@ class Decoder {
     std::optional<Stream> new_stream(AVMediaType type) const;
     void discard_unused_streams(const std::set<AVMediaType> used_streams);
 
+   public:
+    struct Packet {
+        AVPacket* packet = nullptr;
+        Packet() { packet = nullptr; }
+        Packet(AVPacket* p) : packet(p) {}
+        ~Packet() { av_packet_free(&packet); }
+        Packet(const Packet&) = delete;
+        Packet& operator=(const Packet&) = delete;
+        Packet(Packet&& o) {
+            packet = o.packet;
+            o.packet = nullptr;
+        }
+        Packet& operator=(Packet&& o) noexcept {
+            av_packet_free(&packet);
+            packet = o.packet;
+            o.packet = nullptr;
+            return *this;
+        }
+    };
+
    private:
     static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);
     std::thread launch_video_decoder() const;
     std::thread launch_audio_decoder() const;
-    static void resample_audio(const Decoder::AudioStream& audio, UniqueAVFrame& output, const UniqueAVFrame& input);
+    static Frame resample_audio(const AudioStream& audio, const AVFrame* input);
 };

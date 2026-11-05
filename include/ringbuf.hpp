@@ -39,18 +39,16 @@ enum class Error {
 
 template <typename T>
 class Receiver {
-    std::shared_ptr<std::vector<T>> buf = nullptr;
+    std::shared_ptr<std::vector<std::optional<T>>> buf = nullptr;
     std::shared_ptr<std::atomic<std::size_t>> msg_count = nullptr;
-    std::shared_ptr<std::atomic_bool> end = nullptr;
     std::size_t index = 0;
 
    public:
     Receiver() {}
 
-    Receiver(std::shared_ptr<std::vector<T>> buf,
-             std::shared_ptr<std::atomic<std::size_t>> msg_count,
-             std::shared_ptr<std::atomic_bool> end)
-        : buf(std::move(buf)), msg_count(std::move(msg_count)), end(std::move(end)) {}
+    Receiver(std::shared_ptr<std::vector<std::optional<T>>> buf,
+             std::shared_ptr<std::atomic<std::size_t>> msg_count)
+        : buf(std::move(buf)), msg_count(std::move(msg_count)) {}
 
     Receiver(const Receiver&) = delete;
     Receiver& operator=(const Receiver&) = delete;
@@ -58,18 +56,15 @@ class Receiver {
     Receiver& operator=(Receiver&&) = default;
 
     std::expected<T, Error> try_receive() {
-        // need to be loaded before `msg_count`
-        bool isend = end->load(std::memory_order::seq_cst);
-
-        if (msg_count->load(std::memory_order::acquire) == 0) {
-            if (isend) return std::unexpected(Error::EndOfInput);
+        if (msg_count->load(std::memory_order::acquire) == 0)
             return std::unexpected(Error::Empty);
-        }
 
-        T res = std::move((*buf)[index]);
+        std::optional<T> res = std::move((*buf)[index]);
+        if (!res) return std::unexpected(Error::EndOfInput);
+
         index = (index + 1) % buf->size();
         msg_count->fetch_sub(1, std::memory_order::acq_rel);
-        return res;
+        return std::move(*res);
     }
 
     template <typename D>
@@ -77,7 +72,7 @@ class Receiver {
         auto start = std::chrono::steady_clock::now();
         while (std::chrono::steady_clock::now() - start < timeout) {
             auto msg = try_receive();
-            if (msg || msg.error() != Error::Empty) return msg;
+            if (msg != std::unexpected(Error::Empty)) return msg;
             std::this_thread::sleep_for(POLLING_INTERVAL);
         }
         return std::unexpected(Error::Timeout);
@@ -87,7 +82,7 @@ class Receiver {
     std::expected<T, Error> receive_deadline(D deadline) {
         while (std::chrono::steady_clock::now() < deadline) {
             auto msg = try_receive();
-            if (msg || msg.error() != Error::Empty) return msg;
+            if (msg != std::unexpected(Error::Empty)) return msg;
             std::this_thread::sleep_for(POLLING_INTERVAL);
         }
         return std::unexpected(Error::Timeout);
@@ -96,7 +91,7 @@ class Receiver {
     std::expected<T, Error> receive() {
         while (1) {
             auto msg = try_receive();
-            if (msg || msg.error() != Error::Empty) return msg;
+            if (msg != std::unexpected(Error::Empty)) return msg;
             std::this_thread::sleep_for(POLLING_INTERVAL);
         }
     }
@@ -106,34 +101,69 @@ class Receiver {
     }
 };
 
-// Sender destructor **will not** `drop_connection`
+// Sender destructor **will not** `send_eof`
 template <typename T>
 class Sender {
-    std::shared_ptr<std::vector<T>> buf = nullptr;
+    std::shared_ptr<std::vector<std::optional<T>>> buf = nullptr;
     std::shared_ptr<std::atomic<std::size_t>> msg_count = nullptr;
-    std::shared_ptr<std::atomic_bool> end = nullptr;
     std::size_t index = 0;
+    bool closed = false;
 
    public:
     Sender() {}
-    Sender(std::shared_ptr<std::vector<T>> buf,
-           std::shared_ptr<std::atomic<std::size_t>> msg_count,
-           std::shared_ptr<std::atomic_bool> end)
-        : buf(std::move(buf)), msg_count(std::move(msg_count)), end(std::move(end)) {}
+
+    Sender(std::shared_ptr<std::vector<std::optional<T>>> buf,
+           std::shared_ptr<std::atomic<std::size_t>> msg_count)
+        : buf(std::move(buf)), msg_count(std::move(msg_count)) {}
+
     ~Sender() {}
+
     Sender(const Sender&) = delete;
     Sender& operator=(const Sender&) = delete;
-    Sender(Sender&& o) noexcept = default;
-    Sender& operator=(Sender&& o) noexcept = default;
+
+    Sender(Sender&& o) noexcept
+        : buf(std::move(o.buf)),
+          msg_count(std::move(o.msg_count)),
+          index(std::exchange(o.index, 0)),
+          closed(std::exchange(o.closed, false)) {}
+    Sender& operator=(Sender&& o) noexcept {
+        if (this != &o) {
+            send_eof();
+            buf = std::move(o.buf);
+            msg_count = std::move(o.msg_count);
+            index = std::exchange(o.index, 0);
+            closed = std::exchange(o.closed, false);
+        }
+        return *this;
+    }
 
     // return message if fail
     std::optional<T> try_send(T message) {
-        if (msg_count->load(std::memory_order::acquire) >= buf->size())
-            return std::move(message);
+        {
+            auto count = msg_count->load(std::memory_order::acquire);
+            assert(count <= buf->size());
+            if (count == buf->size())
+                return std::move(message);
+        }
         (*buf)[index] = std::move(message);
         index = (index + 1) % buf->size();
         msg_count->fetch_add(1, std::memory_order::acq_rel);
         return std::nullopt;
+    }
+
+    bool try_send_eof() {
+        if (!buf) return true;
+        if (closed) return true;
+
+        auto count = msg_count->load(std::memory_order::acquire);
+        assert(count <= buf->size());
+        if (count == buf->size())
+            return false;
+
+        (*buf)[index] = std::nullopt;
+        msg_count->fetch_add(1, std::memory_order::acq_rel);
+
+        return closed = true;
     }
 
     template <typename D>
@@ -155,11 +185,10 @@ class Sender {
         }
     }
 
-    void drop_connection() {
-        buf = nullptr;
-        msg_count = nullptr;
-        end->store(true, std::memory_order::seq_cst);
-        end = nullptr;
+    void send_eof() {
+        while (!try_send_eof()) {
+            std::this_thread::sleep_for(POLLING_INTERVAL);
+        }
     }
 
     std::size_t len() const {
@@ -170,10 +199,9 @@ class Sender {
 template <typename T>
 static inline std::pair<Sender<T>, Receiver<T>> bounded_channel(std::size_t len) {
     assert(len > 0);
-    std::shared_ptr<std::vector<T>> buf = std::make_shared<std::vector<T>>(len);
+    std::shared_ptr<std::vector<std::optional<T>>> buf = std::make_shared<std::vector<std::optional<T>>>(len);
     std::shared_ptr<std::atomic<std::size_t>> msg_count = std::make_shared<std::atomic<std::size_t>>(0);
-    std::shared_ptr<std::atomic_bool> end = std::make_shared<std::atomic_bool>(false);
-    return { Sender(buf, msg_count, end), Receiver(buf, msg_count, end) };
+    return { Sender(buf, msg_count), Receiver(buf, msg_count) };
 }
 
 }  // namespace RingBuf

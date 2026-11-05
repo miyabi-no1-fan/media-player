@@ -22,9 +22,11 @@
 #include <memory>
 #include <vector>
 #include <vulkan/vulkan.hpp>
+extern "C" {
+#include <libavutil/frame.h>
+}
 
 #include "buffer.hpp"
-#include "decoder.hpp"
 #include "descriptors.hpp"
 #include "image.hpp"
 #include "matrix.hpp"
@@ -71,7 +73,7 @@ class VideoTexture : public Texture {
           width(width),
           height(height) {}
     void init() override;
-    void update(const UniqueAVFrame& frame, const mat2x2& transform, std::uint32_t i);
+    void update(AVFrame* frame, const mat2x2& transform, std::uint32_t i);
     void draw(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) override;
 
    private:
@@ -81,7 +83,7 @@ class VideoTexture : public Texture {
     void create_descriptors();
     void create_pipeline();
     void update_ubo(const mat2x2& A, std::size_t i);
-    void update_image(const UniqueAVFrame& frame, std::uint32_t i);
+    void update_image(AVFrame* frame, std::uint32_t i);
 };
 
 }  // namespace aglea
