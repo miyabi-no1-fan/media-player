@@ -29,6 +29,7 @@
 #include "ringbuf.hpp"
 
 class Audio {
+   public:
     RtAudio dac;
     unsigned int channels;
     unsigned int sample_rate;
@@ -60,5 +61,4 @@ class Audio {
     template <typename T>
     static int callback(void* output_buffer, void* input_buffer, unsigned int nbuffer_frames,
                         double stream_time, RtAudioStreamStatus status, void* user_data);
-    void new_state();
 };

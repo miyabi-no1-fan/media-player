@@ -58,7 +58,7 @@ std::thread Decoder::launch() {
     return std::thread([this]() mutable {
         video_decoder_status.store(0);
         audio_decoder_status.store(0);
-        seek_available.store(true);
+        decoder_set_seek_availability(true);
         sub_decoders_should_quit = std::make_shared<std::atomic_bool>(false);
 
         filter = std::make_shared<Filter>();
@@ -80,7 +80,7 @@ std::thread Decoder::launch() {
                 Packet::Audio::sender->drop_connection();
                 bool should_quit = true;
                 while (global_current_us() < duration_us()) {
-                    if (decoder_seek_req.load()) {
+                    if (should_decoder_handle_seek()) {
                         should_quit = false;
                         break;
                     }
@@ -90,9 +90,9 @@ std::thread Decoder::launch() {
             }
 
             while (video || audio) {
-                if (decoder_seek_req.load()) {
+                if (auto target_us = should_decoder_handle_seek()) {
                     // seek frame
-                    std::int64_t ts = seek_time_us.load();
+                    std::int64_t ts = target_us.value();
                     avformat_seek_file(ictx, -1, 0, ts, ts, 0);
 
                     // tell sub-decode threads to quit -- this is flush
@@ -115,8 +115,7 @@ std::thread Decoder::launch() {
                     if (audio) audio_thrd = launch_audio_decoder();
 
                     // seek done
-                    decoder_seek_req.store(false);
-                    decoder_seek_req.notify_all();
+                    decoder_have_handled_seek_flush_sth_by_itself_now_do_some_signaling_stuff();
                     break;
                 }
 
@@ -137,7 +136,7 @@ std::thread Decoder::launch() {
             }
         }
 
-        seek_available.store(false);
+        decoder_set_seek_availability(false);
 
         if (video) Packet::Video::sender->drop_connection();
         if (audio) Packet::Audio::sender->drop_connection();

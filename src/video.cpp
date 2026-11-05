@@ -79,7 +79,7 @@ void Video::play() {
             }
         }
 
-        if (key_cooldown_us == 0 && seek_req_ok.load() && seek_available.load()) {
+        if (key_cooldown_us == 0 && can_video_ask_for_more_seek()) {
             int key_right = glfwGetKey(w, GLFW_KEY_RIGHT);
 
             if (key_right == GLFW_PRESS) {
@@ -93,7 +93,7 @@ void Video::play() {
             }
         }
 
-        if (key_cooldown_us == 0 && seek_req_ok.load() && seek_available.load()) {
+        if (key_cooldown_us == 0 && can_video_ask_for_more_seek()) {
             int key_left = glfwGetKey(w, GLFW_KEY_LEFT);
 
             if (key_left == GLFW_PRESS) {
@@ -135,13 +135,7 @@ void Video::pause() {
 }
 
 void Video::seek(std::int64_t target_us) {
-    paused.store(false);
-    seek_time_us.store(target_us);
-    audio_current_us.store(nullptr);
-    decoder_seek_req.store(true);
-    audio_seek_req.store(true);
-    audio_seek_req.wait(true);
-    seek_req_ok.wait(true);
+    video_call_this_to_do_a_seek(*this, target_us);
 }
 
 bool Video::render() {
@@ -153,8 +147,7 @@ bool Video::render() {
             auto res = Frame::Video::receiver->receive();
             if (!res) {
                 // edge case: quit while seek_req_ok is false
-                seek_req_ok.store(true);
-                seek_req_ok.notify_all();
+                video_tell_audio_seek_is_ok();
                 // !res means end of input
                 return false;
             }
@@ -185,11 +178,7 @@ bool Video::render() {
         }
     }
 
-    // video frame is ready, so we clear this flag
-    if (!seek_req_ok.load()) {
-        seek_req_ok.store(true);
-        seek_req_ok.notify_all();
-    }
+    video_tell_audio_seek_is_ok();
 
     if (!has_video) {
         // We skipped receive because of no video,
