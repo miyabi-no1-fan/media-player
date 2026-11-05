@@ -24,6 +24,8 @@
 #include "ringbuf.hpp"
 #include "spsc.hpp"
 
+// todo: do some magic so sub decode thread doesn't have to poll when sending frames
+
 std::atomic<std::shared_ptr<std::atomic_int64_t>> audio_current_us = nullptr;
 std::atomic_bool paused = false;
 std::atomic_bool seek_available = false;
