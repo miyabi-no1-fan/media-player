@@ -26,11 +26,11 @@
 #include <stdexcept>
 #include <vulkan/vulkan.hpp>
 extern "C" {
+#include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
 }
 
 #include "buffer.hpp"
-#include "decoder.hpp"
 #include "descriptors.hpp"
 #include "image.hpp"
 #include "pipeline.hpp"
@@ -212,7 +212,7 @@ void VideoTexture::create_pipeline() {
         pipeline_config);
 }
 
-void VideoTexture::update(const UniqueAVFrame& frame, const mat2x2& transform, std::uint32_t i) {
+void VideoTexture::update(AVFrame* frame, const mat2x2& transform, std::uint32_t i) {
     update_ubo(transform, i);
     update_image(frame, i);
     prev_image_index = i;
@@ -274,7 +274,7 @@ void VideoTexture::update_ubo(const mat2x2& A, std::size_t i) {
     v->transformation = norm * scale_to_fit * A * to_pixels_coord;
 }
 
-void VideoTexture::update_image(const UniqueAVFrame& frame, std::uint32_t i) {
+void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
     if (frame == nullptr) {
         if (prev_image_index == std::numeric_limits<std::uint32_t>::max()) return;
         if (prev_image_index == i) return;
