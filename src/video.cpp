@@ -147,7 +147,7 @@ void Video::seek(std::int64_t target_us) {
 bool Video::render() {
     window.poll_events();
 
-    Decoder::Frame decoded = {};
+    UniqueAVFrame decoded = {};
     if (!paused.load() && has_video) {
         while (1) {
             auto res = Frame::Video::receiver->receive();
@@ -159,7 +159,9 @@ bool Video::render() {
                 return false;
             }
 
-            std::int64_t pts = av_rescale_q(res->frame->best_effort_timestamp, res->frame->time_base, AV_TIME_BASE_Q);
+            auto& frame = res.value();
+
+            std::int64_t pts = av_rescale_q(frame->best_effort_timestamp, frame->time_base, AV_TIME_BASE_Q);
             if (!pts_offset) pts_offset = pts;
             else pts -= *pts_offset;
 
@@ -174,10 +176,10 @@ bool Video::render() {
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
                     target = global_current_us();
                 }
-                decoded = std::move(*res);
+                decoded = std::move(frame);
                 break;
             } else {
-                decoded = std::move(*res);
+                decoded = std::move(frame);
                 break;
             }
         }
@@ -201,7 +203,7 @@ bool Video::render() {
             ? 0.f
             : static_cast<float>(global_current_us()) / static_cast<float>(duration_us);
 
-    if (decoded.frame == nullptr &&
+    if (!decoded &&
         !window.was_window_resized() &&
         progress == prev_progress)
         return true;
@@ -209,7 +211,7 @@ bool Video::render() {
     prev_progress = progress;
 
     if (auto i = renderer.acquire_next_frame()) {
-        if (tx_video) tx_video->update(decoded.frame, transformation, *i);
+        if (tx_video) tx_video->update(decoded.get(), transformation, *i);
         if (tx_progress) tx_progress->update(progress, *i);
         renderer.record_command_buffer(*i);
         renderer.submit_frame(*i);
