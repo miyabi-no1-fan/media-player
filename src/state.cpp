@@ -35,9 +35,51 @@ std::atomic_bool seek_req_ok = false;
 std::int64_t global_current_us() {
     if (auto current_us = audio_current_us.load()) return current_us->load();
     else return seek_time_us.load();
-    // Video thread will set `audio_current_us` to nullptr in a seek req,
-    // so `seek_time_us` is the fallback.
-    // Video thread must set `seek_time_us` before clear the `audio_current_us`.
+}
+
+void video_call_this_to_do_a_seek(Video&, std::int64_t target_us) {
+    paused.store(false);
+    seek_time_us.store(target_us);
+    audio_current_us.store(nullptr);
+    decoder_seek_req.store(true);
+    audio_seek_req.store(true);
+    audio_seek_req.wait(true);
+    seek_req_ok.wait(true);
+}
+
+bool should_audio_handle_seek() { return audio_seek_req.load(); }
+
+void audio_call_this_to_handle_seek_but_you_have_to_clear_the_queue_urself_first(Audio& self) {
+    audio_current_us.store(std::make_shared<std::atomic_int64_t>(0));
+    self.current_us = audio_current_us;
+    decoder_seek_req.wait(true);
+    self.receiver = Frame::Audio::receiver;
+    self.current_us->store(seek_time_us.load());
+    audio_seek_req.store(false);
+    audio_seek_req.notify_all();
+    seek_req_ok.store(false);
+    seek_req_ok.wait(false);
+}
+
+std::optional<std::int64_t> should_decoder_handle_seek() {
+    if (decoder_seek_req.load()) return seek_time_us.load();
+    return std::nullopt;
+}
+
+void decoder_have_handled_seek_flush_sth_by_itself_now_do_some_signaling_stuff() {
+    decoder_seek_req.store(false);
+    decoder_seek_req.notify_all();
+}
+
+void decoder_set_seek_availability(bool flag) { seek_available.store(flag); }
+
+void video_tell_audio_seek_is_ok() {
+    seek_req_ok.store(true);
+    seek_req_ok.notify_all();
+}
+
+bool can_video_ask_for_more_seek() {
+    return seek_req_ok.load() && seek_available.load();
 }
 
 void new_state() {

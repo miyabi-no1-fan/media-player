@@ -18,10 +18,13 @@
 #pragma once
 #include <atomic>
 #include <memory>
+#include <optional>
 
+#include "audio.hpp"
 #include "decoder.hpp"
 #include "ringbuf.hpp"
 #include "spsc.hpp"
+#include "video.hpp"
 
 // audio thread is in `audio.cpp`
 // video thread is in `video.cpp`
@@ -35,49 +38,14 @@
 extern std::atomic<std::shared_ptr<std::atomic_int64_t>> audio_current_us;
 std::int64_t global_current_us();
 
-// Video thread should always use the latest channels.
-// Main decoder thread should always use the latest channels.
-// Sub-decode threads should use the copied state at creation.
-// Audio thread should use the copied state and only update
-// for a `audio_seek_req`.
+void video_call_this_to_do_a_seek(Video& you, std::int64_t where_you_wanna_seek);
 
-// if `audio_seek_req == false`, `audio_current_us` must not be nullptr.
-// if `decoder_seek_req == false`, current shared channels must not be nullptr.
-// if `audio_seek_req == false`, `decoder_seek_req` = true.
-// if `seek_req_ok == true`, `audio_seek_req` = false.
+bool should_audio_handle_seek();
+void audio_call_this_to_handle_seek_but_you_have_to_clear_the_queue_urself_first(Audio& you);
 
-// So a seek chain is
-// `seek_time_us`, set by video.
-// `audio_current_us`, set nullptr by video.
-// -- `global_current_us` will use `seek_time_us` as fallback
-// while `audio_current_us` == nullptr.
-// `decoder_seek_req`, set true by video, audio wait for false.
-// `audio_seek_req`, set true by video, video wait for false.
-// `seek_req_ok`, set false by video, audio wait for true.
-
-// atomic ordering are `seq_cst`
-
-// set by video thread
-extern std::atomic_bool paused;
-
-// set by main decode thread
-// main decode thread will not handle any
-// `decoder_seek_req` when this is false
-extern std::atomic_bool seek_available;
-
-// `decoder_seek_req` is set to true by video and
-// set to false when decoder finish its seek request.
-// must set before `audio_seek_req`.
-extern std::atomic_bool decoder_seek_req;
-
-// `audio_seek_req` is set to true by video and
-// set to false when audio finish its seek request.
-// must set after `decoder_seek_req`.
-extern std::atomic_bool audio_seek_req;
-
-// set by video thread
-// must set before `*_seek_req`.
-extern std::atomic_int64_t seek_time_us;
+std::optional<std::int64_t> should_decoder_handle_seek();
+void decoder_have_handled_seek_flush_sth_by_itself_now_do_some_signaling_stuff();
+void decoder_set_seek_availability(bool is_seek_available);
 
 // `seek_req_ok` is set to true by video
 // and set to false by audio.
@@ -85,7 +53,12 @@ extern std::atomic_int64_t seek_time_us;
 // audio has to wait until video frames ready to play.
 // Video decoder can be slow and might miss a few frames
 // to catch up.
-extern std::atomic_bool seek_req_ok;
+void video_tell_audio_seek_is_ok();
+
+bool can_video_ask_for_more_seek();
+
+// set by video thread
+extern std::atomic_bool paused;
 
 void new_state();
 
