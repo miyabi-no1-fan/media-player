@@ -64,6 +64,7 @@ class Receiver {
 
         index = (index + 1) % buf->size();
         msg_count->fetch_sub(1, std::memory_order::acq_rel);
+        msg_count->notify_one();
         return std::move(*res);
     }
 
@@ -179,10 +180,8 @@ class Sender {
     }
 
     void send(T message) {
-        while (auto msg = try_send(std::move(message))) {
-            std::this_thread::sleep_for(POLLING_INTERVAL);
-            message = std::move(*msg);
-        }
+        msg_count->wait(buf->size());
+        try_send(std::move(message));  // must success
     }
 
     void send_eof() {
