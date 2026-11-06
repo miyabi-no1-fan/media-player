@@ -169,13 +169,8 @@ std::thread Decoder::launch_video_decoder() const {
                 frame->time_base = ictx->streams[video->stream_index]->time_base;
                 UniqueAVFrame out = UniqueAVFrame(av_frame_alloc());
                 av_frame_ref(out.get(), frame.get());
-                while (1) {
-                    auto r = sender->try_send(std::move(out));
-                    if (!r) break;
-                    out = std::move(*r);
-                    if (should_quit->load()) throw 0;
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
-                }
+                sender->send(std::move(out));
+                if (should_quit->load()) throw 0;
                 av_frame_unref(frame.get());
             };
 
@@ -256,14 +251,9 @@ std::thread Decoder::launch_audio_decoder() const {
                         should_quit = sub_decoders_should_quit]() {
         try {
             auto send = [this, &sender, &audio, &should_quit](UniqueAVFrame frame) {
-                while (1) {
-                    frame->time_base = ictx->streams[audio->stream_index]->time_base;
-                    auto r = sender->try_send(std::move(frame));
-                    if (!r) break;
-                    frame = std::move(*r);
-                    if (should_quit->load()) throw 0;
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
-                }
+                frame->time_base = ictx->streams[audio->stream_index]->time_base;
+                sender->send(std::move(frame));
+                if (should_quit->load()) throw 0;
             };
 
             UniqueAVFrame decoded(av_frame_alloc());

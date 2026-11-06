@@ -24,8 +24,6 @@
 #include "ringbuf.hpp"
 #include "spsc.hpp"
 
-// todo: do some magic so sub decode thread doesn't have to poll when sending frames
-
 std::atomic<std::shared_ptr<std::atomic_int64_t>> audio_current_us = nullptr;
 std::atomic_bool paused = false;
 std::atomic_bool seek_available = false;
@@ -43,9 +41,11 @@ void video_call_this_to_do_a_seek(Video&, std::int64_t target_us) {
     paused.store(false);
     seek_time_us.store(target_us);
     audio_current_us.store(nullptr);
+    auto old_receiver = Frame::Video::receiver;
     decoder_seek_req.store(true);
     audio_seek_req.store(true);
     audio_seek_req.wait(true);
+    auto _ = old_receiver->try_receive();
     seek_req_ok.wait(true);
 }
 
@@ -55,6 +55,7 @@ void audio_call_this_to_handle_seek_but_you_have_to_clear_the_queue_urself_first
     audio_current_us.store(std::make_shared<std::atomic_int64_t>(0));
     self.current_us = audio_current_us;
     decoder_seek_req.wait(true);
+    auto _ = self.receiver->try_receive();
     self.receiver = Frame::Audio::receiver;
     self.current_us->store(seek_time_us.load());
     audio_seek_req.store(false);
