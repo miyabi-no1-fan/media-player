@@ -23,7 +23,8 @@ If you build from source:
 ```bash
 git clone https://github.com/miyabi-no1-fan/media-player.git
 cd media-player
-python build.py
+cmake --preset release
+cmake --build --preset release
 ```
 `build.py` is just a small script that call `glslc` and `cmake`,
 you can modify it as you like.

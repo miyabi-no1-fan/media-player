@@ -38,12 +38,13 @@ jobs:
         shell: bash
         run: |
           source vulkansdk/setup-env.sh
-          ./build.py
+          cmake --preset release
+          cmake --build --preset release -j$(nproc)
 
       - name: Package
         run: |
           mkdir "$ARCHIVE"
-          cp "build/$PROJECT" "$ARCHIVE"
+          cp "build/release/$PROJECT" "$ARCHIVE"
           tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
 
@@ -74,12 +75,14 @@ jobs:
             vulkan-headers vulkan-loader-devel ffmpeg-free-devel
 
       - name: Build
-        run: ./build.py
+        run: |
+          cmake --preset release
+          cmake --build --preset release -j$(nproc)
 
       - name: Package
         run: |
           mkdir "$ARCHIVE"
-          cp "build/$PROJECT" "$ARCHIVE"
+          cp "build/release/$PROJECT" "$ARCHIVE"
           tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
 
@@ -109,12 +112,14 @@ jobs:
             vulkan-headers vulkan-icd-loader ffmpeg
 
       - name: Build
-        run: ./build.py
+        run: |
+          cmake --preset release
+          cmake --build --preset release -j$(nproc)
 
       - name: Package
         run: |
           mkdir "$ARCHIVE"
-          cp "build/$PROJECT" "$ARCHIVE"
+          cp "build/release/$PROJECT" "$ARCHIVE"
           tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
 
@@ -164,13 +169,14 @@ jobs:
         run: |
           for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "VSROOT=%%i"
           call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
-          python build.py
+          cmake --preset release
+          cmake --build --preset release -j%NUMBER_OF_PROCESSORS%
 
       - name: Package
         shell: bash
         run: |
           mkdir -p "$ARCHIVE"
-          cp "build/$PROJECT" "$ARCHIVE/"
+          cp "build/release/$PROJECT" "$ARCHIVE/"
           tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
 

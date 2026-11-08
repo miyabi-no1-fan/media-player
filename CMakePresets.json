@@ -1,0 +1,77 @@
+{
+    "version": 8,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20
+    },
+    "configurePresets": [
+        {
+            "name": "release",
+            "displayName": "x86-64 Release",
+            "description": "Generic x86-64 release",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "EXTRA_COMPILE_FLAGS": "-DNDEBUG -O2 -march=x86-64 -mtune=x86-64",
+                "LTO": "ON"
+            }
+        },
+        {
+            "name": "debug-a",
+            "displayName": "Debug with ASan",
+            "description": "Debug with ASan",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "EXTRA_COMPILE_FLAGS": "-g -Og -fno-omit-frame-pointer -fsanitize=address,undefined",
+                "LTO": "OFF"
+            }
+        },
+        {
+            "name": "debug-t",
+            "displayName": "Debug with TSan",
+            "description": "Debug with TSan",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+                "EXTRA_COMPILE_FLAGS": "-g -Og -fno-omit-frame-pointer -fsanitize=thread",
+                "LTO": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "release",
+            "displayName": "x86-64 Release",
+            "description": "Generic x86-64 release",
+            "configurePreset": "release",
+            "configuration": "Release",
+            "verbose": false
+        },
+        {
+            "name": "debug-a",
+            "displayName": "Debug with ASan",
+            "description": "Debug with ASan",
+            "configurePreset": "debug-a",
+            "configuration": "Debug",
+            "verbose": false
+        },
+        {
+            "name": "debug-t",
+            "displayName": "Debug with TSan",
+            "description": "Debug with TSan",
+            "configurePreset": "debug-t",
+            "configuration": "Debug",
+            "verbose": false
+        }
+    ]
+}
