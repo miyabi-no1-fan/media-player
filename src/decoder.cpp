@@ -96,8 +96,14 @@ std::jthread Decoder::launch() {
                     std::int64_t ts = state.current_us();
                     avformat_seek_file(ictx, -1, 0, ts, ts, 0);
 
-                    if (video_thrd.joinable()) video_thrd.detach();
-                    if (audio_thrd.joinable()) audio_thrd.detach();
+                    if (video_thrd.joinable()) {
+                        video_thrd.request_stop();
+                        video_thrd.detach();
+                    }
+                    if (audio_thrd.joinable()) {
+                        audio_thrd.request_stop();
+                        audio_thrd.detach();
+                    }
 
                     if (video)
                         if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO))
@@ -144,7 +150,7 @@ std::jthread Decoder::launch() {
 
 std::jthread Decoder::launch_video_decoder() const {
     // capture by copy the current state of the decoder
-    return std::jthread([this, video = video, filter = filter]() {
+    return std::jthread([this, video = video, filter = filter](std::stop_token should_stop) {
         SubDecoderVideoState state;
         state.init();
         if (!video) return;
@@ -174,6 +180,7 @@ std::jthread Decoder::launch_video_decoder() const {
                         TRY(res);
                         filtered->time_base = ictx->streams[video->stream_index]->time_base;
                         if (state.send(std::move(filtered)) != std::nullopt) return;
+                        if (should_stop.stop_requested()) return;
                     }
                 }
 
@@ -197,6 +204,7 @@ std::jthread Decoder::launch_video_decoder() const {
             TRY(res);
             filtered->time_base = ictx->streams[video->stream_index]->time_base;
             if (state.send(std::move(filtered)) != std::nullopt) return;
+            if (should_stop.stop_requested()) return;
         }
     });
 }
@@ -214,7 +222,7 @@ std::jthread Decoder::launch_video_decoder() const {
 
 std::jthread Decoder::launch_audio_decoder() const {
     // capture by copy the current state of the decoder
-    return std::jthread([this, audio = audio]() {
+    return std::jthread([this, audio = audio](std::stop_token should_stop) {
         SubDecoderAudioState state;
         state.init();
         if (!audio) return;
@@ -239,6 +247,8 @@ std::jthread Decoder::launch_audio_decoder() const {
                 }
 
                 av_frame_unref(decoded.get());
+
+                if (should_stop.stop_requested()) return;
             }
         };
 
@@ -256,6 +266,7 @@ std::jthread Decoder::launch_audio_decoder() const {
                 TRY(resample_audio(*audio, out, nullptr));
                 if (out->nb_samples == 0) break;
                 if (state.send(std::move(out)) != std::nullopt) return;
+                if (should_stop.stop_requested()) return;
             }
         }
     });
