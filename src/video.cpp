@@ -126,9 +126,6 @@ void Video::play() {
         key_cooldown_us = std::max(key_cooldown_us - frame_time_us, std::int64_t(0));
     }
 
-    // we won't send any further seek req here
-    // decode thread don't have to wait anymore
-    state.release_decode_thread();
     state.unblock_audio_thread();
 }
 

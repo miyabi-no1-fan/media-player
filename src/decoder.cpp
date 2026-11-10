@@ -25,6 +25,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <thread>
 #include <utility>
@@ -51,8 +52,8 @@ extern "C" {
 static std::atomic_int video_decoder_status = 0;
 static std::atomic_int audio_decoder_status = 0;
 
-std::thread Decoder::launch() {
-    return std::thread([this]() mutable {
+std::jthread Decoder::launch() {
+    return std::jthread([this](std::stop_token should_stop) mutable {
         DecoderState state;
         state.init();
         video_decoder_status.store(0);
@@ -78,7 +79,7 @@ std::thread Decoder::launch() {
             } else {
                 state.close_connection();
                 bool should_quit = true;
-                while (state.should_wait()) {
+                while (!should_stop.stop_requested()) {
                     if (state.is_seek()) {
                         should_quit = false;
                         break;
@@ -98,9 +99,15 @@ std::thread Decoder::launch() {
                     if (video_thrd.joinable()) video_thrd.detach();
                     if (audio_thrd.joinable()) audio_thrd.detach();
 
-                    if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video = std::make_shared<VideoStream>(std::move(*strm));
-                    if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio = std::make_shared<AudioStream>(std::move(*strm));
+                    if (video)
+                        if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO))
+                            video = std::make_shared<VideoStream>(std::move(*strm));
+                    if (audio)
+                        if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO))
+                            audio = std::make_shared<AudioStream>(std::move(*strm));
+
                     if (video) filter = std::make_shared<Filter>();
+
                     if (video) video_thrd = launch_video_decoder();
                     if (audio) audio_thrd = launch_audio_decoder();
 
@@ -166,7 +173,7 @@ std::jthread Decoder::launch_video_decoder() const {
                         if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
                         TRY(res);
                         filtered->time_base = ictx->streams[video->stream_index]->time_base;
-                        if (!state.send(std::move(filtered))) return;
+                        if (state.send(std::move(filtered)) != std::nullopt) return;
                     }
                 }
 
@@ -189,7 +196,7 @@ std::jthread Decoder::launch_video_decoder() const {
             if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
             TRY(res);
             filtered->time_base = ictx->streams[video->stream_index]->time_base;
-            if (!state.send(std::move(filtered))) return;
+            if (state.send(std::move(filtered)) != std::nullopt) return;
         }
     });
 }
@@ -224,9 +231,9 @@ std::jthread Decoder::launch_audio_decoder() const {
                     if (audio->swr) {
                         UniqueAVFrame out(av_frame_alloc());
                         TRY(resample_audio(*audio, out, decoded));
-                        if (!state.send(std::move(out))) return;
+                        if (state.send(std::move(out)) != std::nullopt) return;
                     } else {
-                        if (!state.send(std::move(decoded))) return;
+                        if (state.send(std::move(decoded)) != std::nullopt) return;
                         decoded = UniqueAVFrame(av_frame_alloc());
                     }
                 }
@@ -248,7 +255,7 @@ std::jthread Decoder::launch_audio_decoder() const {
                 UniqueAVFrame out(av_frame_alloc());
                 TRY(resample_audio(*audio, out, nullptr));
                 if (out->nb_samples == 0) break;
-                if (!state.send(std::move(out))) return;
+                if (state.send(std::move(out)) != std::nullopt) return;
             }
         }
     });

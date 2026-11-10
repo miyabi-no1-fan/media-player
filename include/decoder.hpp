@@ -183,7 +183,7 @@ class Decoder {
     void no_video() { video = nullptr; }
     void no_audio() { audio = nullptr; }
 
-    std::thread launch();
+    std::jthread launch();
 
     ~Decoder() {
         avformat_close_input(&ictx);

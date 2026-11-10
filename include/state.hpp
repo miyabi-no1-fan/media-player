@@ -18,9 +18,12 @@
 #pragma once
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <stop_token>
+#include <thread>
 #include <utility>
 
 #include "decoder.hpp"
@@ -62,12 +65,6 @@ class State {
     // so it's not necessary slow anymore.
     // So this flag is to fix the issue.
     std::atomic_bool audio_should_wait = false;
-
-    // decode thread will wait to handle seek request if any
-    // as long as the flag is true,
-    // this is pretty expensive if the wait is long,
-    // because decode thread is polling to check for both flags.
-    std::atomic_bool decode_thread_should_wait = true;
 
     MPMCQueue<UniqueAVPacket> video_packet_queue;
     MPMCQueue<UniqueAVPacket> audio_packet_queue;
@@ -138,7 +135,6 @@ class VideoState {
     }
     std::optional<UniqueAVFrame> recv() { return state->video_frame_queue.pop(); }
     void close_queue() { state->video_frame_queue.close(); }
-    void release_decode_thread() { state->decode_thread_should_wait.store(false); }
 };
 
 class AudioState {
@@ -160,6 +156,31 @@ class AudioState {
     void close_queue() { state->audio_frame_queue.close(); }
 };
 
+inline std::jthread handle_no_audio_play() {
+    return std::jthread([](std::stop_token should_stop) {
+        using namespace std::chrono;
+        microseconds step(1000);
+        AudioState state;
+        state.init();
+        state.close_queue();
+        time_point<steady_clock> next = steady_clock::now() + step;
+        while (!should_stop.stop_requested()) {
+            state.wait_video();
+            if (!state.is_paused()) {
+                state.next_current_us(step.count());
+                if (state.is_seek()) state.handle_seek();
+            }
+
+            std::this_thread::sleep_until(next);
+            next += step;
+
+            // resync if overshoot
+            auto now = steady_clock::now();
+            if (now > next) next = now + step;
+        }
+    });
+}
+
 class DecoderState {
     std::shared_ptr<State> state;
 
@@ -176,7 +197,6 @@ class DecoderState {
     std::size_t video_packet_queue_len() const { return state->video_packet_queue.size(); }
     std::size_t audio_packet_queue_len() const { return state->audio_packet_queue.size(); }
     std::int64_t current_us() { return state->current_us.load(); }
-    bool should_wait() { return state->decode_thread_should_wait.load(); }
     bool is_seek() const { return state->decoder_seek_req.load(); }
     // return the target_us
     void handle_seek() {
