@@ -62,8 +62,8 @@ std::jthread Decoder::launch() {
         filter = std::make_shared<Filter>();
 
         std::jthread video_thrd, audio_thrd;
-        if (video) video_thrd = launch_video_decoder();
-        if (audio) audio_thrd = launch_audio_decoder();
+        video_thrd = launch_video_decoder();
+        audio_thrd = launch_audio_decoder();
 
         UniqueAVPacket packet(av_packet_alloc());
         while (video || audio) {
@@ -108,8 +108,8 @@ std::jthread Decoder::launch() {
 
                     if (video) filter = std::make_shared<Filter>();
 
-                    if (video) video_thrd = launch_video_decoder();
-                    if (audio) audio_thrd = launch_audio_decoder();
+                    video_thrd = launch_video_decoder();
+                    audio_thrd = launch_audio_decoder();
 
                     break;
                 }
@@ -143,11 +143,11 @@ std::jthread Decoder::launch() {
     } while (0)
 
 std::jthread Decoder::launch_video_decoder() const {
-    assert(video);
     // capture by copy the current state of the decoder
     return std::jthread([this, video = video, filter = filter]() {
         SubDecoderVideoState state;
         state.init();
+        if (!video) return;
 
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {
@@ -213,11 +213,11 @@ std::jthread Decoder::launch_video_decoder() const {
     } while (0)
 
 std::jthread Decoder::launch_audio_decoder() const {
-    assert(audio);
     // capture by copy the current state of the decoder
     return std::jthread([this, audio = audio]() {
         SubDecoderAudioState state;
         state.init();
+        if (!audio) return;
 
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {
