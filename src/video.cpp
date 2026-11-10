@@ -188,7 +188,7 @@ bool Video::render() {
         // We skipped receive because of no video,
         // so we won't receive any EndOfInput signal from decoder.
         // This is the fallback
-        // TODO: add some magic way to fallback here.
+        if (state.has_all_queue_ended()) return false;
     }
 
     float progress =

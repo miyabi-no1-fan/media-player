@@ -135,6 +135,12 @@ class VideoState {
     }
     std::optional<UniqueAVFrame> recv() { return state->video_frame_queue.pop(); }
     void close_queue() { state->video_frame_queue.close(); }
+    bool has_all_queue_ended() {
+        return state->video_frame_queue.empty() && state->video_frame_queue.is_closed() &&
+               state->audio_frame_queue.empty() && state->audio_frame_queue.is_closed() &&
+               state->video_packet_queue.empty() && state->video_packet_queue.is_closed() &&
+               state->audio_packet_queue.empty() && state->audio_packet_queue.is_closed();
+    }
 };
 
 class AudioState {
