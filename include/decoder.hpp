@@ -132,12 +132,10 @@ class Decoder {
             else fmt = supported_audio_formats.begin()->first;
 
             swr_free(&swr);
-            // clang-format off
             swr_alloc_set_opts2(&swr,
-                &decoder->ch_layout, fmt, decoder->sample_rate,
-                &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
-                0, nullptr);
-            // clang-format on
+                                &decoder->ch_layout, fmt, decoder->sample_rate,
+                                &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
+                                0, nullptr);
             swr_init(swr);
         }
         AudioStream(AudioStream&& o) noexcept : Stream(std::move(o)), swr(std::exchange(o.swr, nullptr)) {}
