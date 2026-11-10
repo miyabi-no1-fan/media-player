@@ -278,7 +278,7 @@ class Decoder {
    public:
    private:
     static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);
-    std::thread launch_video_decoder() const;
-    std::thread launch_audio_decoder() const;
-    static UniqueAVFrame resample_audio(const AudioStream& audio, const UniqueAVFrame& input);
+    std::jthread launch_video_decoder() const;
+    std::jthread launch_audio_decoder() const;
+    static int resample_audio(const AudioStream& audio, UniqueAVFrame& output, const UniqueAVFrame& input);
 };

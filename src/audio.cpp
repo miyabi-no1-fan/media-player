@@ -21,9 +21,7 @@
 extern "C" {
 #include <libavutil/avutil.h>
 }
-#include <atomic>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -42,31 +40,22 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     Audio& self = *static_cast<Audio*>(user_data);
     T* buffer = static_cast<T*>(output_buffer);
 
+    self.state.wait_video();
+
     const std::size_t needed = static_cast<std::size_t>(nbuffer_frames) *
                                static_cast<std::size_t>(self.channels);
     const std::int64_t sample_time_us = (static_cast<std::int64_t>(nbuffer_frames) * AV_TIME_BASE) /
                                         static_cast<std::int64_t>(self.sample_rate);
 
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(sample_time_us);
-
-    if (paused.load()) {
+    if (self.state.is_paused()) {
         std::memset(buffer, 0, needed * sizeof(T));
         return 0;
     }
 
-    self.current_us->fetch_add(sample_time_us);
+    self.state.next_current_us(sample_time_us);
 
     while (self.queue<T>().size() < needed) {
-        if (std::chrono::steady_clock::now() >= deadline)
-            deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(sample_time_us);
-
-        auto res = self.receiver->receive_deadline(deadline - std::chrono::microseconds(10));
-
-        if (should_audio_handle_seek()) {
-            self.queue<T>().clear();  // flush
-            audio_call_this_to_handle_seek_but_you_have_to_clear_the_queue_urself_first(self);
-        }
-
+        auto res = self.state.recv();
         if (!res) break;
 
         auto& frame = res.value();
@@ -84,6 +73,11 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     std::memcpy(buffer, self.queue<T>().data(), n * sizeof(T));
     if (n < needed) std::memset(buffer + n, 0, (needed - n) * sizeof(T));
     self.queue<T>().erase(self.queue<T>().begin(), self.queue<T>().begin() + n);
+
+    if (self.state.is_seek()) {
+        self.state.handle_seek();
+        self.queue<T>().clear();
+    }
 
     return 0;
 }
@@ -123,15 +117,12 @@ Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat samp
 }
 
 Audio::~Audio() {
-    if (dac.isStreamRunning())
-        dac.stopStream();
-    dac.closeStream();
+    if (dac.isStreamRunning()) dac.abortStream();
+    if (dac.isStreamOpen()) dac.closeStream();
 }
 
 void Audio::play() {
-    audio_current_us.store(std::make_shared<std::atomic_int64_t>(0));
-    current_us = audio_current_us;
-    receiver = Frame::Audio::receiver;
+    state.init();
     if (dac.startStream())
         throw std::runtime_error(dac.getErrorText());
 }
