@@ -109,8 +109,10 @@ int main(int argc, const char* argv[]) try {
         else threads.push_back(handle_no_audio_play());
         if (video) video->play();
 
-        for (auto&& thread : threads)
+        for (auto&& thread : threads) {
             thread.request_stop();
+            thread.join();
+        }
     }
 
     return 0;
