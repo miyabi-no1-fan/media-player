@@ -18,12 +18,11 @@
 #include "video.hpp"
 
 #include <algorithm>
-#include <atomic>
+#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <expected>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -42,6 +41,9 @@ extern "C" {
 #include "textures/video_texture.hpp"
 
 void Video::play() {
+    state.init();
+    if (!has_video) state.close_queue();
+
     GLFWwindow* w = window.get_window();
 
     bool key_space_locked = false;
@@ -79,12 +81,12 @@ void Video::play() {
             }
         }
 
-        if (key_cooldown_us == 0 && can_video_ask_for_more_seek()) {
+        if (key_cooldown_us == 0 && state.is_seek_available()) {
             int key_right = glfwGetKey(w, GLFW_KEY_RIGHT);
 
             if (key_right == GLFW_PRESS) {
                 auto target_us = std::clamp(
-                    global_current_us() + 10 * AV_TIME_BASE,
+                    state.current_us() + 10 * AV_TIME_BASE,
                     std::int64_t(0),
                     duration_us);
                 seek(target_us);
@@ -93,12 +95,12 @@ void Video::play() {
             }
         }
 
-        if (key_cooldown_us == 0 && can_video_ask_for_more_seek()) {
+        if (key_cooldown_us == 0 && state.is_seek_available()) {
             int key_left = glfwGetKey(w, GLFW_KEY_LEFT);
 
             if (key_left == GLFW_PRESS) {
                 auto target_us = std::clamp(
-                    global_current_us() - 10 * AV_TIME_BASE,
+                    state.current_us() - 10 * AV_TIME_BASE,
                     std::int64_t(0),
                     duration_us);
                 seek(target_us);
@@ -123,34 +125,32 @@ void Video::play() {
 
         key_cooldown_us = std::max(key_cooldown_us - frame_time_us, std::int64_t(0));
     }
+
+    state.unblock_audio_thread();
 }
 
 void Video::pause() {
-    if (paused.load()) {
-        paused.store(false);
-    } else {
-        paused.store(true);
+    if (!state.is_paused()) {
         show_progress_bar();
+        state.pause();
+    } else {
+        state.play();
     }
 }
 
 void Video::seek(std::int64_t target_us) {
-    video_call_this_to_do_a_seek(*this, target_us);
+    state.seek(target_us);  // seek also block audio thread
+    // we have to call unblock_audio_thread
 }
 
 bool Video::render() {
     window.poll_events();
 
     UniqueAVFrame decoded = {};
-    if (!paused.load() && has_video) {
+    if (!state.is_paused() && has_video) {
         while (1) {
-            auto res = Frame::Video::receiver->receive();
-            if (!res) {
-                // edge case: quit while seek_req_ok is false
-                video_tell_audio_seek_is_ok();
-                // !res means end of input
-                return false;
-            }
+            auto res = state.recv();
+            if (!res) return false;
 
             auto& frame = res.value();
 
@@ -158,16 +158,17 @@ bool Video::render() {
             if (!pts_offset) pts_offset = pts;
             else pts -= *pts_offset;
 
-            std::int64_t target = global_current_us();
+            std::int64_t target = state.current_us();
 
             if (pts < target - frame_time_us) {
                 // underrun
+                state.pause();  // pause so audio wait for us
                 continue;
             } else if (pts > target + frame_time_us) {
                 // overrun
                 while (pts > target + frame_time_us) {
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
-                    target = global_current_us();
+                    target = state.current_us();
                 }
                 decoded = std::move(frame);
                 break;
@@ -176,21 +177,24 @@ bool Video::render() {
                 break;
             }
         }
+
+        // play in case got paused previously
+        state.play();
     }
 
-    video_tell_audio_seek_is_ok();
+    state.unblock_audio_thread();
 
     if (!has_video) {
         // We skipped receive because of no video,
         // so we won't receive any EndOfInput signal from decoder.
         // This is the fallback
-        if (global_current_us() >= duration_us) return false;
+        if (state.has_all_queue_ended()) return false;
     }
 
     float progress =
         (should_hide_progress_bar)
             ? 0.f
-            : static_cast<float>(global_current_us()) / static_cast<float>(duration_us);
+            : static_cast<float>(state.current_us()) / static_cast<float>(duration_us);
 
     if (!decoded &&
         !window.was_window_resized() &&

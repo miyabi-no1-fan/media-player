@@ -27,6 +27,7 @@ extern "C" {
 
 #include "matrix.hpp"
 #include "renderer.hpp"
+#include "state.hpp"
 #include "textures/progress_bar.hpp"
 #include "textures/video_texture.hpp"
 #include "window.hpp"
@@ -50,6 +51,8 @@ class Video {
     aglea::Renderer renderer;
     std::unique_ptr<aglea::VideoTexture> tx_video = nullptr;
     std::unique_ptr<aglea::ProgressBar> tx_progress = nullptr;
+
+    VideoState state;
 
    public:
     Video(std::uint32_t width,

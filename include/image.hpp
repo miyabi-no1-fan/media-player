@@ -123,14 +123,11 @@ static Image staging_buffer(
         usage | vk::ImageUsageFlagBits::eTransferDst,
         properties);
     ctx.single_time_commands([&staged, &image](vk::UniqueCommandBuffer& cmd) {
-        // clang-format off
         vk::BufferImageCopy region(
             0, 0, 0,
             vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
             { 0, 0, 0 },
-            image.get_extent()
-        );
-        // clang-format on
+            image.get_extent());
         image.transition_image_layout(
             cmd,
             vk::ImageLayout::eTransferDstOptimal,

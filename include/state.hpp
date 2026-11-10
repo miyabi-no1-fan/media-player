@@ -17,14 +17,17 @@
 */
 #pragma once
 #include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstddef>
 #include <memory>
 #include <optional>
+#include <stop_token>
+#include <thread>
+#include <utility>
 
-#include "audio.hpp"
 #include "decoder.hpp"
-#include "ringbuf.hpp"
-#include "spsc.hpp"
-#include "video.hpp"
+#include "mpmc.hpp"
 
 // audio thread is in `audio.cpp`
 // video thread is in `video.cpp`
@@ -34,58 +37,207 @@
 // 1 main decode thread -- the packet producer
 // 2 sub-decode threads (audio and video) -- the frame producers
 
-// "master clock", create and manually counted by audio thread.
-extern std::atomic<std::shared_ptr<std::atomic_int64_t>> audio_current_us;
-std::int64_t global_current_us();
+class VideoState;
+class AudioState;
+class DecoderState;
+class SubDecoderVideoState;
+class SubDecoderAudioState;
 
-void video_call_this_to_do_a_seek(Video& you, std::int64_t where_you_wanna_seek);
+class State {
+   private:
+    std::atomic_int64_t current_us = 0;
+    std::atomic_bool paused = false;
 
-bool should_audio_handle_seek();
-void audio_call_this_to_handle_seek_but_you_have_to_clear_the_queue_urself_first(Audio& you);
+    // signal decoder to handle seek req
+    std::atomic_bool decoder_seek_req = false;
 
-std::optional<std::int64_t> should_decoder_handle_seek();
-void decoder_have_handled_seek_flush_sth_by_itself_now_do_some_signaling_stuff();
-void decoder_set_seek_availability(bool is_seek_available);
+    // signal audio to handle seek req
+    std::atomic_bool audio_seek_req = false;
 
-// `seek_req_ok` is set to true by video
-// and set to false by audio.
-// After decoder and audio finish their seek req
-// audio has to wait until video frames ready to play.
-// Video decoder can be slow and might miss a few frames
-// to catch up.
-void video_tell_audio_seek_is_ok();
+    // after a seek req, video decode usually slower than audio
+    // which results in audio play then video just freeze
+    // until video decode finally catch up.
+    // our A/V sync logic doesn't help much here.
+    // the blocking recv will wait until the first frame produce
+    // is why it's freezing,
+    // only after the very first frame received would A/V sync help
+    // -- but decoder and channels has warmed up by then
+    // so it's not necessary slow anymore.
+    // So this flag is to fix the issue.
+    std::atomic_bool audio_should_wait = false;
 
-bool can_video_ask_for_more_seek();
+    MPMCQueue<UniqueAVPacket> video_packet_queue;
+    MPMCQueue<UniqueAVPacket> audio_packet_queue;
+    MPMCQueue<UniqueAVFrame> video_frame_queue{ 10 };
+    MPMCQueue<UniqueAVFrame> audio_frame_queue{ 10 };
 
-// set by video thread
-extern std::atomic_bool paused;
+   public:
+    State() {}
+    ~State() {
+        video_packet_queue.close();
+        audio_packet_queue.close();
+        video_frame_queue.close();
+        audio_frame_queue.close();
+    }
 
-void new_state();
+    State(const State&) = delete;
+    State& operator=(const State&) = delete;
+    State(State&&) = delete;
+    State& operator=(State&&) = delete;
 
-namespace Packet {
-namespace Video {
-static constexpr int SOFT_LIMIT = 10;
-extern std::shared_ptr<SPSC::Sender<UniqueAVPacket>> sender;
-extern std::shared_ptr<SPSC::Receiver<UniqueAVPacket>> receiver;
-}  // namespace Video
-namespace Audio {
-static constexpr int SOFT_LIMIT = 10;
-extern std::shared_ptr<SPSC::Sender<UniqueAVPacket>> sender;
-extern std::shared_ptr<SPSC::Receiver<UniqueAVPacket>> receiver;
-}  // namespace Audio
-void new_channels();
-}  // namespace Packet
+    friend VideoState;
+    friend AudioState;
+    friend DecoderState;
+    friend SubDecoderVideoState;
+    friend SubDecoderAudioState;
+};
 
-namespace Frame {
-namespace Video {
-static constexpr int CONCURRENT_LIMIT = 10;
-extern std::shared_ptr<RingBuf::Sender<UniqueAVFrame>> sender;
-extern std::shared_ptr<RingBuf::Receiver<UniqueAVFrame>> receiver;
-}  // namespace Video
-namespace Audio {
-static constexpr int CONCURRENT_LIMIT = 10;
-extern std::shared_ptr<RingBuf::Sender<UniqueAVFrame>> sender;
-extern std::shared_ptr<RingBuf::Receiver<UniqueAVFrame>> receiver;
-}  // namespace Audio
-void new_channels();
-}  // namespace Frame
+// NO ONE IS ALLOWED TO USE THIS VARIABLE OUTSIDE OF `state.hpp`
+extern std::atomic<std::shared_ptr<State>> global_state;
+// ONLY CALL IN `main.cpp`
+inline void new_state() { global_state = std::make_shared<State>(); }
+
+class VideoState {
+    std::shared_ptr<State> state;
+
+   public:
+    VideoState() = default;
+    ~VideoState() { state->video_frame_queue.close(); }
+    void init() { state = global_state.load(); }
+    std::int64_t current_us() const { return state->current_us.load(); }
+    bool is_paused() const { return state->paused.load(); }
+    void pause() { state->paused.store(true); }
+    void play() { state->paused.store(false); }
+    bool is_seek_available() { return true; }
+    void seek(std::int64_t target_us) {
+        assert(is_seek_available());
+
+        auto old_state = std::move(state);
+
+        state = std::make_shared<State>();
+        state->current_us.store(target_us);
+        state->audio_should_wait.store(true);
+        global_state.store(state);
+
+        old_state->decoder_seek_req.store(true);
+        old_state->audio_seek_req.store(true);
+
+        old_state->paused.store(false);
+        old_state->audio_should_wait.store(false);
+        old_state->audio_should_wait.notify_one();
+
+        old_state->video_frame_queue.close();
+        old_state->audio_frame_queue.close();
+    }
+    void unblock_audio_thread() {
+        state->audio_should_wait.store(false);
+        state->audio_should_wait.notify_one();
+    }
+    std::optional<UniqueAVFrame> recv() { return state->video_frame_queue.pop(); }
+    void close_queue() { state->video_frame_queue.close(); }
+    bool has_all_queue_ended() {
+        return state->video_frame_queue.empty() && state->video_frame_queue.is_closed() &&
+               state->audio_frame_queue.empty() && state->audio_frame_queue.is_closed() &&
+               state->video_packet_queue.empty() && state->video_packet_queue.is_closed() &&
+               state->audio_packet_queue.empty() && state->audio_packet_queue.is_closed();
+    }
+};
+
+class AudioState {
+    std::shared_ptr<State> state;
+
+   public:
+    AudioState() = default;
+    ~AudioState() { close_queue(); }
+    void init() { state = global_state.load(); }
+    bool is_paused() const { return state->paused.load(); }
+    void next_current_us(std::int64_t step) { state->current_us.fetch_add(step); }
+    bool is_seek() const { return state->audio_seek_req.load(); }
+    void handle_seek() {
+        assert(is_seek());
+        state = global_state.load();
+    }
+    void wait_video() { state->audio_should_wait.wait(true); }
+    std::optional<UniqueAVFrame> recv() { return state->audio_frame_queue.pop(); }
+    void close_queue() { state->audio_frame_queue.close(); }
+};
+
+inline std::jthread handle_no_audio_play() {
+    return std::jthread([](std::stop_token should_stop) {
+        using namespace std::chrono;
+        microseconds step(1000);
+        AudioState state;
+        state.init();
+        state.close_queue();
+        time_point<steady_clock> next = steady_clock::now() + step;
+        while (!should_stop.stop_requested()) {
+            state.wait_video();
+            if (!state.is_paused()) {
+                state.next_current_us(step.count());
+                if (state.is_seek()) state.handle_seek();
+            }
+
+            std::this_thread::sleep_until(next);
+            next += step;
+
+            // resync if overshoot
+            auto now = steady_clock::now();
+            if (now > next) next = now + step;
+        }
+    });
+}
+
+class DecoderState {
+    std::shared_ptr<State> state;
+
+   public:
+    DecoderState() = default;
+    void init() { state = global_state.load(); }
+    ~DecoderState() { close_connection(); }
+    std::optional<UniqueAVPacket> send_video_packet(UniqueAVPacket packet) { return state->video_packet_queue.push(std::move(packet)); }
+    std::optional<UniqueAVPacket> send_audio_packet(UniqueAVPacket packet) { return state->audio_packet_queue.push(std::move(packet)); }
+    void close_connection() {
+        state->video_packet_queue.close();
+        state->audio_packet_queue.close();
+    }
+    std::size_t video_packet_queue_len() const { return state->video_packet_queue.size(); }
+    std::size_t audio_packet_queue_len() const { return state->audio_packet_queue.size(); }
+    std::int64_t current_us() { return state->current_us.load(); }
+    bool is_seek() const { return state->decoder_seek_req.load(); }
+    // return the target_us
+    void handle_seek() {
+        assert(is_seek());
+        close_connection();
+        state = global_state.load();
+    }
+};
+
+class SubDecoderVideoState {
+    std::shared_ptr<State> state;
+
+   public:
+    SubDecoderVideoState() = default;
+    void init() { state = global_state.load(); }
+    ~SubDecoderVideoState() {
+        state->video_packet_queue.close();
+        state->video_frame_queue.close();
+    }
+    std::int64_t current_us() { return state->current_us.load(); }
+    std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->video_frame_queue.push(std::move(frame)); }
+    std::optional<UniqueAVPacket> recv() { return state->video_packet_queue.pop(); }
+};
+
+class SubDecoderAudioState {
+    std::shared_ptr<State> state;
+
+   public:
+    SubDecoderAudioState() = default;
+    void init() { state = global_state.load(); }
+    ~SubDecoderAudioState() {
+        state->audio_packet_queue.close();
+        state->audio_frame_queue.close();
+    }
+    std::int64_t current_us() { return state->current_us.load(); }
+    std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->audio_frame_queue.push(std::move(frame)); }
+    std::optional<UniqueAVPacket> recv() { return state->audio_packet_queue.pop(); }
+};

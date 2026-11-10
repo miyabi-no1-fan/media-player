@@ -28,6 +28,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "audio.hpp"
 #include "decoder.hpp"
@@ -75,7 +76,9 @@ int main(int argc, const char* argv[]) try {
             info.no_window) decoder.no_video();
         if (info.no_audio) decoder.no_audio();
 
-        std::thread handle = decoder.launch();
+        std::vector<std::jthread> threads;
+
+        threads.push_back(decoder.launch());
 
         std::unique_ptr<Audio> audio = nullptr;
 
@@ -103,9 +106,13 @@ int main(int argc, const char* argv[]) try {
         }
 
         if (audio) audio->play();
+        else threads.push_back(handle_no_audio_play());
         if (video) video->play();
 
-        handle.join();
+        for (auto&& thread : threads) {
+            thread.request_stop();
+            thread.join();
+        }
     }
 
     return 0;

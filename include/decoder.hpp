@@ -132,12 +132,10 @@ class Decoder {
             else fmt = supported_audio_formats.begin()->first;
 
             swr_free(&swr);
-            // clang-format off
             swr_alloc_set_opts2(&swr,
-                &decoder->ch_layout, fmt, decoder->sample_rate,
-                &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
-                0, nullptr);
-            // clang-format on
+                                &decoder->ch_layout, fmt, decoder->sample_rate,
+                                &decoder->ch_layout, decoder->sample_fmt, decoder->sample_rate,
+                                0, nullptr);
             swr_init(swr);
         }
         AudioStream(AudioStream&& o) noexcept : Stream(std::move(o)), swr(std::exchange(o.swr, nullptr)) {}
@@ -183,7 +181,7 @@ class Decoder {
     void no_video() { video = nullptr; }
     void no_audio() { audio = nullptr; }
 
-    std::thread launch();
+    std::jthread launch();
 
     ~Decoder() {
         avformat_close_input(&ictx);
@@ -278,7 +276,7 @@ class Decoder {
    public:
    private:
     static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);
-    std::thread launch_video_decoder() const;
-    std::thread launch_audio_decoder() const;
-    static UniqueAVFrame resample_audio(const AudioStream& audio, const UniqueAVFrame& input);
+    std::jthread launch_video_decoder() const;
+    std::jthread launch_audio_decoder() const;
+    static int resample_audio(const AudioStream& audio, UniqueAVFrame& output, const UniqueAVFrame& input);
 };

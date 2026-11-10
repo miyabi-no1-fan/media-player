@@ -18,24 +18,18 @@
 #pragma once
 #include <RtAudio.h>
 
-#include <atomic>
 #include <cstdint>
-#include <memory>
-#include <optional>
 #include <variant>
 #include <vector>
 
-#include "decoder.hpp"
-#include "ringbuf.hpp"
+#include "state.hpp"
 
 class Audio {
    public:
     RtAudio dac;
     unsigned int channels;
     unsigned int sample_rate;
-    std::shared_ptr<RingBuf::Receiver<UniqueAVFrame>> receiver = nullptr;
-    std::shared_ptr<std::atomic_int64_t> current_us = nullptr;
-    std::optional<std::atomic_int64_t> pts_offset = std::nullopt;
+    AudioState state;
 
     std::variant<
         std::vector<float>,
