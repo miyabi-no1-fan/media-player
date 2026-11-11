@@ -18,7 +18,6 @@
 #include "decoder.hpp"
 
 #include <atomic>
-#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -93,7 +92,7 @@ std::jthread Decoder::launch() {
                 if (state.is_seek()) {
                     state.handle_seek();
 
-                    std::int64_t ts = state.current_us();
+                    std::int64_t ts = state.current_us() + start_time_us();
                     avformat_seek_file(ictx, -1, 0, ts, ts, 0);
 
                     if (video_thrd.joinable()) {
@@ -164,14 +163,14 @@ std::jthread Decoder::launch_video_decoder() const {
                                  ictx->streams[video->stream_index]->time_base,
                                  filter_descr);
 
-                std::int64_t target_ts = av_rescale_q(
-                    state.current_us(),
+                std::int64_t target_pts = av_rescale_q(
+                    state.current_us() + start_time_us(),
                     AV_TIME_BASE_Q,
                     ictx->streams[video->stream_index]->time_base);
 
                 decoded->pts = decoded->best_effort_timestamp;
 
-                if (decoded->pts >= target_ts) {
+                if (decoded->pts >= target_pts) {
                     TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, decoded.get(), AV_BUFFERSRC_FLAG_KEEP_REF));
                     while (1) {
                         UniqueAVFrame filtered(av_frame_alloc());
@@ -179,6 +178,9 @@ std::jthread Decoder::launch_video_decoder() const {
                         if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
                         TRY(res);
                         filtered->time_base = ictx->streams[video->stream_index]->time_base;
+                        filtered->pts = filtered->best_effort_timestamp;
+                        filtered->pts -= av_rescale_q(start_time_us(), AV_TIME_BASE_Q,
+                                                      ictx->streams[video->stream_index]->time_base);
                         if (state.send(std::move(filtered)) != std::nullopt) return;
                         if (should_stop.stop_requested()) return;
                     }
@@ -203,6 +205,9 @@ std::jthread Decoder::launch_video_decoder() const {
             if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
             TRY(res);
             filtered->time_base = ictx->streams[video->stream_index]->time_base;
+            filtered->pts = filtered->best_effort_timestamp;
+            filtered->pts -= av_rescale_q(start_time_us(), AV_TIME_BASE_Q,
+                                          ictx->streams[video->stream_index]->time_base);
             if (state.send(std::move(filtered)) != std::nullopt) return;
             if (should_stop.stop_requested()) return;
         }
@@ -230,12 +235,12 @@ std::jthread Decoder::launch_audio_decoder() const {
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {
             while (avcodec_receive_frame(audio->decoder, decoded.get()) >= 0) {
-                std::int64_t target_ts = av_rescale_q(
-                    state.current_us(),
+                std::int64_t target_pts = av_rescale_q(
+                    state.current_us() + start_time_us(),
                     AV_TIME_BASE_Q,
                     ictx->streams[audio->stream_index]->time_base);
 
-                if (decoded->pts >= target_ts) {
+                if (decoded->pts >= target_pts) {
                     if (audio->swr) {
                         UniqueAVFrame out(av_frame_alloc());
                         TRY(resample_audio(*audio, out, decoded));

@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 extern "C" {
 #include <libavutil/avutil.h>
@@ -38,7 +37,6 @@ class Video {
     std::size_t bpp = 3;
     std::int64_t frame_time_us = static_cast<std::int64_t>(AV_TIME_BASE / 60.f);
     std::int64_t duration_us;
-    std::optional<std::int64_t> pts_offset = std::nullopt;
     aglea::mat2x2 transformation = aglea::mat2x2::identity();
     float cursor_x;
     float cursor_y;
