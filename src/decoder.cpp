@@ -118,7 +118,7 @@ std::jthread Decoder::launch() {
                 if (v <= VIDEO_PACKET_QUEUE_SOFT_LIMIT || a <= AUDIO_PACKET_QUEUE_SOFT_LIMIT) {
                     break;
                 }
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
     });

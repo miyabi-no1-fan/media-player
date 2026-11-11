@@ -39,8 +39,8 @@
 
 constexpr std::size_t VIDEO_PACKET_QUEUE_SOFT_LIMIT = 10;
 constexpr std::size_t AUDIO_PACKET_QUEUE_SOFT_LIMIT = 10;
-constexpr std::size_t VIDEO_FRAME_QUEUE_BOUND = 10;
-constexpr std::size_t AUDIO_FRAME_QUEUE_BOUND = 10;
+constexpr std::size_t VIDEO_FRAME_QUEUE_BOUND = 30;
+constexpr std::size_t AUDIO_FRAME_QUEUE_BOUND = 50;
 
 class VideoState;
 class AudioState;
