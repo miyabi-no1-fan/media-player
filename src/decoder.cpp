@@ -17,7 +17,6 @@
 */
 #include "decoder.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -47,16 +46,10 @@ extern "C" {
 
 #include "state.hpp"
 
-// hold an AVERROR code if < 0
-static std::atomic_int video_decoder_status = 0;
-static std::atomic_int audio_decoder_status = 0;
-
 std::jthread Decoder::launch() {
     return std::jthread([this](std::stop_token should_stop) mutable {
         DecoderState state;
         state.init();
-        video_decoder_status.store(0);
-        audio_decoder_status.store(0);
 
         filter = std::make_shared<Filter>();
 
@@ -67,13 +60,9 @@ std::jthread Decoder::launch() {
         UniqueAVPacket packet(av_packet_alloc());
         while (video || audio) {
             if (av_read_frame(ictx, packet.get()) >= 0) {
-                if (video && packet->stream_index == video->stream_index) {
-                    if (state.send_video_packet(std::move(packet)) != std::nullopt)
-                        video = nullptr;
-                } else if (audio && packet->stream_index == audio->stream_index) {
-                    if (state.send_audio_packet(std::move(packet)) != std::nullopt)
-                        audio = nullptr;
-                }
+                if (false) std::unreachable();
+                else if (video && packet->stream_index == video->stream_index) state.send_video_packet(std::move(packet));
+                else if (audio && packet->stream_index == audio->stream_index) state.send_audio_packet(std::move(packet));
                 packet = UniqueAVPacket(av_packet_alloc());
             } else {
                 state.close_connection();
@@ -119,10 +108,8 @@ std::jthread Decoder::launch() {
                     break;
                 }
 
-                if (video_decoder_status.load(std::memory_order::relaxed) < 0)
-                    video = nullptr;
-                if (audio_decoder_status.load(std::memory_order::relaxed) < 0)
-                    audio = nullptr;
+                if (state.sub_decode_video_status() < 0) video = nullptr;
+                if (state.sub_decode_audio_status() < 0) audio = nullptr;
 
                 unsigned long v = std::numeric_limits<unsigned long>::max();
                 if (video) v = state.video_packet_queue_len();
@@ -137,14 +124,14 @@ std::jthread Decoder::launch() {
     });
 }
 
-#define TRY(expr)                                                        \
-    do {                                                                 \
-        int ret;                                                         \
-        if ((ret = expr) < 0) {                                          \
-            video_decoder_status.store(ret, std::memory_order::relaxed); \
-            std::cerr << "Video decode error: " << ret << "\n";          \
-            return;                                                      \
-        }                                                                \
+#define TRY(expr)                                               \
+    do {                                                        \
+        int ret;                                                \
+        if ((ret = expr) < 0) {                                 \
+            state.error(ret);                                   \
+            std::cerr << "Video decode error: " << ret << "\n"; \
+            return;                                             \
+        }                                                       \
     } while (0)
 
 std::jthread Decoder::launch_video_decoder() const {
@@ -215,14 +202,14 @@ std::jthread Decoder::launch_video_decoder() const {
 }
 
 #undef TRY
-#define TRY(expr)                                                        \
-    do {                                                                 \
-        int ret;                                                         \
-        if ((ret = expr) < 0) {                                          \
-            audio_decoder_status.store(ret, std::memory_order::relaxed); \
-            std::cerr << "Audio decode error: " << ret << "\n";          \
-            return;                                                      \
-        }                                                                \
+#define TRY(expr)                                               \
+    do {                                                        \
+        int ret;                                                \
+        if ((ret = expr) < 0) {                                 \
+            state.error(ret);                                   \
+            std::cerr << "Audio decode error: " << ret << "\n"; \
+            return;                                             \
+        }                                                       \
     } while (0)
 
 std::jthread Decoder::launch_audio_decoder() const {

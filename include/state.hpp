@@ -66,6 +66,10 @@ class State {
     // So this flag is to fix the issue.
     std::atomic_bool audio_should_wait = false;
 
+    // hold an AVERROR code if < 0
+    std::atomic_int sub_decode_video_status = 0;
+    std::atomic_int sub_decode_audio_status = 0;
+
     MPMCQueue<UniqueAVPacket> video_packet_queue;
     MPMCQueue<UniqueAVPacket> audio_packet_queue;
     MPMCQueue<UniqueAVFrame> video_frame_queue{ 10 };
@@ -210,6 +214,8 @@ class DecoderState {
         close_connection();
         state = global_state.load();
     }
+    int sub_decode_video_status() { return state->sub_decode_video_status.load(); }
+    int sub_decode_audio_status() { return state->sub_decode_audio_status.load(); }
 };
 
 class SubDecoderVideoState {
@@ -225,6 +231,7 @@ class SubDecoderVideoState {
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->video_frame_queue.push(std::move(frame)); }
     std::optional<UniqueAVPacket> recv() { return state->video_packet_queue.pop(); }
+    void error(int e) { state->sub_decode_video_status.store(e); }
 };
 
 class SubDecoderAudioState {
@@ -240,4 +247,5 @@ class SubDecoderAudioState {
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->audio_frame_queue.push(std::move(frame)); }
     std::optional<UniqueAVPacket> recv() { return state->audio_packet_queue.pop(); }
+    void error(int e) { state->sub_decode_audio_status.store(e); }
 };
