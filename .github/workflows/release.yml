@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            wget python3 build-essential pkg-config cmake ninja \
+            wget python3 build-essential pkg-config cmake ninja-build \
             libwayland-dev wayland-protocols libxkbcommon-dev xorg-dev \
             libasound2-dev libpulse-dev libjack-jackd2-dev \
             libvulkan-dev libavfilter-dev libavformat-dev \
