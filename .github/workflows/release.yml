@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            wget python3 build-essential pkg-config cmake make \
+            wget python3 build-essential pkg-config cmake ninja \
             libwayland-dev wayland-protocols libxkbcommon-dev xorg-dev \
             libasound2-dev libpulse-dev libjack-jackd2-dev \
             libvulkan-dev libavfilter-dev libavformat-dev \
@@ -68,7 +68,7 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y \
-            @development-tools git pkgconf-pkg-config cmake make glslc python3 llvm clang \
+            @development-tools git pkgconf-pkg-config cmake ninja glslc python3 llvm clang \
             wayland-devel wayland-protocols-devel libxkbcommon-devel libX11-devel \
             libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel \
             alsa-lib-devel pulseaudio-libs-devel jack-audio-connection-kit-devel \
@@ -106,7 +106,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm \
-            base-devel git pkgconf cmake make shaderc python llvm clang \
+            base-devel git pkgconf cmake ninja shaderc python llvm clang \
             wayland wayland-protocols libxkbcommon libx11 libxrandr libxinerama libxcursor libxi \
             alsa-lib libpulse jack2 \
             vulkan-headers vulkan-icd-loader ffmpeg
