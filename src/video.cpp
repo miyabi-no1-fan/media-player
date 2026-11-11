@@ -154,9 +154,7 @@ bool Video::render() {
 
             auto& frame = res.value();
 
-            std::int64_t pts = av_rescale_q(frame->best_effort_timestamp, frame->time_base, AV_TIME_BASE_Q);
-            if (!pts_offset) pts_offset = pts;
-            else pts -= *pts_offset;
+            std::int64_t pts = av_rescale_q(frame->pts, frame->time_base, AV_TIME_BASE_Q);
 
             std::int64_t target = state.current_us();
 
