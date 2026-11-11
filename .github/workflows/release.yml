@@ -58,7 +58,7 @@ jobs:
 
   fedora_build:
     runs-on: ubuntu-latest
-    container: fedora:45 # should be `fedora:latest` after November 3, 2026.
+    container: fedora:latest
     env:
       ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-fedora-x86_64
     steps:
