@@ -136,7 +136,8 @@ std::jthread Decoder::launch() {
 
 std::jthread Decoder::launch_video_decoder() const {
     // capture by copy the current state of the decoder
-    return std::jthread([this, video = video, filter = filter](std::stop_token should_stop) {
+    return std::jthread([video = video, filter = filter, filter_descr = filter_descr, start_time_us = start_time_us(),
+                         time_base = ictx->streams[video->stream_index]->time_base](std::stop_token should_stop) {
         SubDecoderVideoState state;
         state.init();
         if (!video) return;
@@ -144,16 +145,10 @@ std::jthread Decoder::launch_video_decoder() const {
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {
             while (avcodec_receive_frame(video->decoder, decoded.get()) >= 0) {
-                if (!filter->graph)
-                    init_filters(*filter,
-                                 *video,
-                                 ictx->streams[video->stream_index]->time_base,
-                                 filter_descr);
+                if (!filter->graph) init_filters(*filter, *video, time_base, filter_descr);
 
-                std::int64_t target_pts = av_rescale_q(
-                    state.current_us() + start_time_us(),
-                    AV_TIME_BASE_Q,
-                    ictx->streams[video->stream_index]->time_base);
+                std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us,
+                                                       AV_TIME_BASE_Q, time_base);
 
                 decoded->pts = decoded->best_effort_timestamp;
 
@@ -164,10 +159,9 @@ std::jthread Decoder::launch_video_decoder() const {
                         int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.get());
                         if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
                         TRY(res);
-                        filtered->time_base = ictx->streams[video->stream_index]->time_base;
+                        filtered->time_base = time_base;
                         filtered->pts = filtered->best_effort_timestamp;
-                        filtered->pts -= av_rescale_q(start_time_us(), AV_TIME_BASE_Q,
-                                                      ictx->streams[video->stream_index]->time_base);
+                        filtered->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
                         if (state.send(std::move(filtered)) != std::nullopt) return;
                         if (should_stop.stop_requested()) return;
                     }
@@ -191,10 +185,9 @@ std::jthread Decoder::launch_video_decoder() const {
             int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.get());
             if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
             TRY(res);
-            filtered->time_base = ictx->streams[video->stream_index]->time_base;
+            filtered->time_base = time_base;
             filtered->pts = filtered->best_effort_timestamp;
-            filtered->pts -= av_rescale_q(start_time_us(), AV_TIME_BASE_Q,
-                                          ictx->streams[video->stream_index]->time_base);
+            filtered->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
             if (state.send(std::move(filtered)) != std::nullopt) return;
             if (should_stop.stop_requested()) return;
         }
@@ -214,7 +207,8 @@ std::jthread Decoder::launch_video_decoder() const {
 
 std::jthread Decoder::launch_audio_decoder() const {
     // capture by copy the current state of the decoder
-    return std::jthread([this, audio = audio](std::stop_token should_stop) {
+    return std::jthread([audio = audio, start_time_us = start_time_us(),
+                         time_base = ictx->streams[audio->stream_index]->time_base](std::stop_token should_stop) {
         SubDecoderAudioState state;
         state.init();
         if (!audio) return;
@@ -222,10 +216,8 @@ std::jthread Decoder::launch_audio_decoder() const {
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {
             while (avcodec_receive_frame(audio->decoder, decoded.get()) >= 0) {
-                std::int64_t target_pts = av_rescale_q(
-                    state.current_us() + start_time_us(),
-                    AV_TIME_BASE_Q,
-                    ictx->streams[audio->stream_index]->time_base);
+                std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us,
+                                                       AV_TIME_BASE_Q, time_base);
 
                 if (decoded->pts >= target_pts) {
                     if (audio->swr) {
