@@ -115,7 +115,7 @@ std::jthread Decoder::launch() {
                 if (video) v = state.video_packet_queue_len();
                 unsigned long a = std::numeric_limits<unsigned long>::max();
                 if (audio) a = state.audio_packet_queue_len();
-                if (v <= 10 || a <= 10) {
+                if (v <= VIDEO_PACKET_QUEUE_SOFT_LIMIT || a <= AUDIO_PACKET_QUEUE_SOFT_LIMIT) {
                     break;
                 }
                 std::this_thread::sleep_for(std::chrono::microseconds(100));

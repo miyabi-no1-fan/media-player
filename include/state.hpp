@@ -37,6 +37,11 @@
 // 1 main decode thread -- the packet producer
 // 2 sub-decode threads (audio and video) -- the frame producers
 
+constexpr std::size_t VIDEO_PACKET_QUEUE_SOFT_LIMIT = 10;
+constexpr std::size_t AUDIO_PACKET_QUEUE_SOFT_LIMIT = 10;
+constexpr std::size_t VIDEO_FRAME_QUEUE_BOUND = 10;
+constexpr std::size_t AUDIO_FRAME_QUEUE_BOUND = 10;
+
 class VideoState;
 class AudioState;
 class DecoderState;
@@ -72,8 +77,8 @@ class State {
 
     MPMCQueue<UniqueAVPacket> video_packet_queue;
     MPMCQueue<UniqueAVPacket> audio_packet_queue;
-    MPMCQueue<UniqueAVFrame> video_frame_queue{ 10 };
-    MPMCQueue<UniqueAVFrame> audio_frame_queue{ 10 };
+    MPMCQueue<UniqueAVFrame> video_frame_queue{ VIDEO_FRAME_QUEUE_BOUND };
+    MPMCQueue<UniqueAVFrame> audio_frame_queue{ AUDIO_FRAME_QUEUE_BOUND };
 
    public:
     State() {}
