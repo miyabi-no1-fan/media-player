@@ -25,4 +25,4 @@ cd media-player
 cmake --preset release
 cmake --build --preset release
 ```
-You can also modify `CMakePresets.json` as you like.
+You can modify `CMakePresets.json` as you like for this build.
