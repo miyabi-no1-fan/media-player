@@ -272,9 +272,7 @@ class Decoder {
    private:
     std::optional<Stream> new_stream(AVMediaType type) const;
     void discard_unused_streams(const std::set<AVMediaType> used_streams);
-
-   public:
-   private:
+    std::int64_t start_time_us() const { return ictx->start_time == AV_NOPTS_VALUE ? 0 : ictx->start_time; }
     static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);
     std::jthread launch_video_decoder() const;
     std::jthread launch_audio_decoder() const;
