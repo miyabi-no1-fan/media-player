@@ -37,6 +37,11 @@
 // 1 main decode thread -- the packet producer
 // 2 sub-decode threads (audio and video) -- the frame producers
 
+// Packet queue use soft limit because the main decode thread is single threaded
+// and it produces 1 packet at a time, that might be an audio packet or a video packet.
+// If we use normal bound, the video queue may be full while audio is starving.
+// So we have to use a soft limit, where main decode thread only wait when both
+// audio and video is full.
 constexpr std::size_t VIDEO_PACKET_QUEUE_SOFT_LIMIT = 10;
 constexpr std::size_t AUDIO_PACKET_QUEUE_SOFT_LIMIT = 10;
 constexpr std::size_t VIDEO_FRAME_QUEUE_BOUND = 30;
