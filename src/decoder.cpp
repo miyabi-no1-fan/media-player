@@ -137,7 +137,7 @@ std::jthread Decoder::launch() {
 std::jthread Decoder::launch_video_decoder() const {
     // capture by copy the current state of the decoder
     return std::jthread([video = video, filter = filter, filter_descr = filter_descr, start_time_us = start_time_us(),
-                         time_base = ictx->streams[video->stream_index]->time_base](std::stop_token should_stop) {
+                         time_base = video ? ictx->streams[video->stream_index]->time_base : AVRational()](std::stop_token should_stop) {
         SubDecoderVideoState state;
         state.init();
         if (!video) return;
@@ -208,7 +208,7 @@ std::jthread Decoder::launch_video_decoder() const {
 std::jthread Decoder::launch_audio_decoder() const {
     // capture by copy the current state of the decoder
     return std::jthread([audio = audio, start_time_us = start_time_us(),
-                         time_base = ictx->streams[audio->stream_index]->time_base](std::stop_token should_stop) {
+                         time_base = audio ? ictx->streams[audio->stream_index]->time_base : AVRational()](std::stop_token should_stop) {
         SubDecoderAudioState state;
         state.init();
         if (!audio) return;
