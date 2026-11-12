@@ -19,10 +19,6 @@
 
 layout(location = 0) out float frag_color;
 
-layout(set = 0, binding = 0, std140) uniform UBO {
-    float progress;
-};
-
 const vec2 positions[4] = {
     vec2(-1, 0.99),
     vec2(1, 0.99),

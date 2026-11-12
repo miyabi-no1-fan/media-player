@@ -63,7 +63,7 @@ void ProgressBar::create_ubo() {
 void ProgressBar::create_descriptors() {
     descriptor_set_layout =
         DescriptorSetLayout::Builder(renderer.ctx)
-            .add_binding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
+            .add_binding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eFragment)
             .build();
 
     descriptor_sets.resize(renderer.swap_chain->image_count());
