@@ -33,8 +33,6 @@ extern "C" {
 #include <libswresample/swresample.h>
 }
 #include <cstdint>
-#include <cstdio>
-#include <cstring>
 #include <map>
 #include <memory>
 #include <optional>
@@ -54,9 +52,6 @@ static const std::map<AVSampleFormat, RtAudioFormat> supported_audio_formats = {
 inline RtAudioFormat rt_audio_format(const AVSampleFormat& format) {
     return supported_audio_formats.find(format)->second;
 }
-
-// output pixels format for the FFmpeg filter
-static constexpr const char* pixel_format = "yuv420p";
 
 struct AVPacketDeleter {
     void operator()(AVPacket* p) const { av_packet_free(&p); }
@@ -163,19 +158,7 @@ class Decoder {
         if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio = std::make_shared<AudioStream>(std::move(*strm));
         discard_unused_streams({ AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_AUDIO });
 
-        if (video) {
-            bool has_subtitle = false;
-            for (unsigned i = 0; i < ictx->nb_streams; i++) {
-                has_subtitle = ictx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE;
-                if (has_subtitle) break;
-            }
-            if (has_subtitle) {
-                filter_descr.resize(32 + std::strlen(path));
-                std::snprintf(filter_descr.data(), filter_descr.size(), "subtitles=filename='%s'", path);
-            } else {
-                filter_descr = "null";
-            }
-        }
+        init_filter_descr(path);
     }
 
     void no_video() { video = nullptr; }
@@ -208,7 +191,6 @@ class Decoder {
 
     std::optional<AVPixelFormat> output_pixel_format() const {
         if (!video) return std::nullopt;
-        static_assert(std::string_view(pixel_format) == "yuv420p");
         return AV_PIX_FMT_YUV420P;
     }
 
@@ -271,6 +253,7 @@ class Decoder {
 
    private:
     std::optional<Stream> new_stream(AVMediaType type) const;
+    void init_filter_descr(const std::string path);
     void discard_unused_streams(const std::set<AVMediaType> used_streams);
     std::int64_t start_time_us() const { return ictx->start_time == AV_NOPTS_VALUE ? 0 : ictx->start_time; }
     static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);

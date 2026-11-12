@@ -18,6 +18,7 @@
 #include "decoder.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -27,6 +28,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavcodec/defs.h>
@@ -300,6 +302,26 @@ void Decoder::discard_unused_streams(const std::set<AVMediaType> used_streams) {
     }
 }
 
+void Decoder::init_filter_descr(const std::string path) {
+    std::vector<std::string> descrs;
+
+    descrs.push_back("format=pix_fmts=yuv420p");
+
+    if (video) {
+        bool has_subtitle = false;
+        for (unsigned i = 0; i < ictx->nb_streams; i++) {
+            has_subtitle = ictx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE;
+            if (has_subtitle) break;
+        }
+        if (has_subtitle) descrs.push_back("subtitles=filename='" + path + "'");
+    }
+
+    for (std::size_t i = 0; i < descrs.size(); i++) {
+        filter_descr += descrs[i];
+        if (i != descrs.size() - 1) filter_descr += ",";
+    }
+}
+
 // copy from https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c
 int Decoder::init_filters(Decoder::Filter& filter,
                           const Decoder::VideoStream& video,
@@ -343,12 +365,6 @@ int Decoder::init_filters(Decoder::Filter& filter,
     if (!filter.buffersink_ctx) {
         av_log(NULL, AV_LOG_ERROR, "Cannot create buffer sink\n");
         ret = AVERROR(ENOMEM);
-        goto end;
-    }
-
-    ret = av_opt_set(filter.buffersink_ctx, "pixel_formats", pixel_format, AV_OPT_SEARCH_CHILDREN);
-    if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot set output pixel format\n");
         goto end;
     }
 
