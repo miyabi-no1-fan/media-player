@@ -72,6 +72,7 @@ std::jthread Decoder::launch() {
             } else {
                 state.close_connection();
                 while (!should_stop.stop_requested() && !state.is_seek()) {
+                    // TODO: make this blocking instead of polling
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
             }
