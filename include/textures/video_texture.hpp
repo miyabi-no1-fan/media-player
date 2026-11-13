@@ -56,9 +56,9 @@ class VideoTexture : public Texture {
     std::vector<std::unique_ptr<Buffer>> ubo;
 
     vk::UniqueSampler image_sampler;
-    static constexpr std::size_t PLANES = 3;
-    std::vector<std::array<std::unique_ptr<Buffer>, PLANES>> staging_buffers;
-    std::vector<std::array<std::unique_ptr<Image>, PLANES>> image_planes;
+    static constexpr std::size_t NPLANES = 3;
+    std::vector<std::array<std::unique_ptr<Buffer>, NPLANES>> staging_buffers;
+    std::vector<std::array<std::unique_ptr<Image>, NPLANES>> image_planes;
 
    public:
     VideoTexture(Renderer& renderer,

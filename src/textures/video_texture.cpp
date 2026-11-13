@@ -90,7 +90,7 @@ void VideoTexture::create_image_resources() {
     staging_buffers.resize(renderer.swap_chain->image_count());
     renderer.ctx.single_time_commands([this](const vk::UniqueCommandBuffer& cmd) {
         for (std::size_t i = 0; i < renderer.swap_chain->image_count(); i++) {
-            for (std::size_t p = 0; p < PLANES; p++) {
+            for (std::size_t p = 0; p < VideoTexture::NPLANES; p++) {
                 image_planes[i][p] = std::make_unique<Image>(
                     renderer.ctx,
                     vk::ImageType::e2D, vk::Format::eR8Unorm,
@@ -183,7 +183,7 @@ void VideoTexture::update(AVFrame* frame, const mat2x2& transform, std::uint32_t
 }
 
 void VideoTexture::pre(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) {
-    for (std::size_t p = 0; p < PLANES; p++) {
+    for (std::size_t p = 0; p < VideoTexture::NPLANES; p++) {
         vk::ImageMemoryBarrier image_before(
             vk::AccessFlagBits::eNone, vk::AccessFlagBits::eTransferWrite,
             vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageLayout::eTransferDstOptimal,
@@ -274,7 +274,7 @@ void VideoTexture::update_ubo(const mat2x2& A, std::size_t i) {
 void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
     if (frame == nullptr) return;
     if (frame->format == AV_PIX_FMT_YUV420P) {
-        for (std::size_t p = 0; p < PLANES; p++) {
+        for (std::size_t p = 0; p < VideoTexture::NPLANES; p++) {
             std::uint8_t* dst = static_cast<std::uint8_t*>(staging_buffers[i][p]->get_mapped_memory());
             std::size_t dst_stride = get_width(p);
             std::uint8_t* src = frame->data[p];
