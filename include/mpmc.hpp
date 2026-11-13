@@ -29,8 +29,8 @@ template <typename T>
 class MPMCQueue {
     std::queue<T> queue;
     mutable std::mutex mutex;
-    std::condition_variable condvar;   // signalled when an item is available
-    std::condition_variable not_full;  // signalled when space is available
+    std::condition_variable not_empty;  // signalled when an item is available
+    std::condition_variable not_full;   // signalled when space is available
     std::size_t bound = std::numeric_limits<decltype(bound)>::max();
     bool closed = false;
 
@@ -48,7 +48,7 @@ class MPMCQueue {
         if (closed) return value;
         queue.push(std::move(value));
         lock.unlock();
-        condvar.notify_one();
+        not_empty.notify_one();
         return std::nullopt;
     }
 
@@ -59,7 +59,7 @@ class MPMCQueue {
             if (closed || queue.size() >= bound) return value;
             queue.push(std::move(value));
         }
-        condvar.notify_one();
+        not_empty.notify_one();
         return std::nullopt;
     }
 
@@ -67,7 +67,7 @@ class MPMCQueue {
     // queue is closed AND drained.
     std::optional<T> pop() {
         std::unique_lock lock(mutex);
-        condvar.wait(lock, [&] { return closed || !queue.empty(); });
+        not_empty.wait(lock, [&] { return closed || !queue.empty(); });
         if (queue.empty()) return std::nullopt;
         T value = std::move(queue.front());
         queue.pop();
@@ -93,7 +93,7 @@ class MPMCQueue {
             std::lock_guard lock(mutex);
             closed = true;
         }
-        condvar.notify_all();
+        not_empty.notify_all();
         not_full.notify_all();
     }
 
