@@ -63,7 +63,7 @@ std::jthread Decoder::launch() {
         audio_thrd = launch_audio_decoder();
 
         UniqueAVPacket packet(av_packet_alloc());
-        while (video || audio) {
+        while ((video || audio) && !should_stop.stop_requested()) {
             if (av_read_frame(ictx, packet.get()) >= 0) {
                 if (false) std::unreachable();
                 else if (video && packet->stream_index == video->stream_index) state.send_video_packet(std::move(packet));
@@ -71,18 +71,12 @@ std::jthread Decoder::launch() {
                 packet = UniqueAVPacket(av_packet_alloc());
             } else {
                 state.close_connection();
-                bool should_quit = true;
-                while (!should_stop.stop_requested()) {
-                    if (state.is_seek()) {
-                        should_quit = false;
-                        break;
-                    }
+                while (!should_stop.stop_requested() && !state.is_seek()) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 }
-                if (should_quit) break;
             }
 
-            while ((video || audio) && state.waiting_for_packet_queue()) {
+            while ((video || audio) && !should_stop.stop_requested() && state.waiting_for_packet_queue()) {
                 if (state.is_seek()) {
                     state.handle_seek();
 
