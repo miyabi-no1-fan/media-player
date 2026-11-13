@@ -140,6 +140,9 @@ class VideoState {
         global_state.store(state);
 
         old_state->decoder_seek_req.store(true);
+        old_state->packet_queue_waker.store(true);
+        old_state->packet_queue_waker.notify_one();
+
         old_state->audio_seek_req.store(true);
 
         old_state->paused.store(false);
@@ -256,6 +259,8 @@ class SubDecoderVideoState {
     ~SubDecoderVideoState() {
         state->video_packet_queue.close();
         state->video_frame_queue.close();
+        state->packet_queue_waker.store(true);
+        state->packet_queue_waker.notify_one();
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->video_frame_queue.push(std::move(frame)); }
@@ -277,6 +282,8 @@ class SubDecoderAudioState {
     ~SubDecoderAudioState() {
         state->audio_packet_queue.close();
         state->audio_frame_queue.close();
+        state->packet_queue_waker.store(true);
+        state->packet_queue_waker.notify_one();
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->audio_frame_queue.push(std::move(frame)); }
