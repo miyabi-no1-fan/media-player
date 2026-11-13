@@ -123,6 +123,7 @@ class VideoState {
     ~VideoState() { state->video_frame_queue.close(); }
     void init() { state = global_state.load(); }
     std::int64_t current_us() const { return state->current_us.load(); }
+    void wait_for_clock() const { state->current_us.wait(current_us()); }
     bool is_paused() const { return state->paused.load(); }
     void pause() { state->paused.store(true); }
     void play() { state->paused.store(false); }
@@ -172,7 +173,10 @@ class AudioState {
     ~AudioState() { close_queue(); }
     void init() { state = global_state.load(); }
     bool is_paused() const { return state->paused.load(); }
-    void next_current_us(std::int64_t step) { state->current_us.fetch_add(step); }
+    void next_current_us(std::int64_t step) {
+        state->current_us.fetch_add(step);
+        state->current_us.notify_all();
+    }
     bool is_seek() const { return state->audio_seek_req.load(); }
     void handle_seek() {
         assert(is_seek());

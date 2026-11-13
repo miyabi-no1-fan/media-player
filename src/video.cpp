@@ -19,14 +19,12 @@
 
 #include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <thread>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 extern "C" {
@@ -164,7 +162,7 @@ bool Video::render() {
             } else if (pts > target + frame_time_us) {
                 // overrun
                 while (pts > target + frame_time_us) {
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    state.wait_for_clock();
                     target = state.current_us();
                 }
                 decoded = std::move(frame);
