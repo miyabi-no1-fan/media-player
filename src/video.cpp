@@ -126,7 +126,7 @@ void Video::play() {
         key_cooldown_us = std::max(key_cooldown_us - frame_time_us, std::int64_t(0));
     }
 
-    state.unblock_audio_thread();
+    if (state.is_seeking()) state.seeking_release();
 }
 
 void Video::pause() {
@@ -139,8 +139,7 @@ void Video::pause() {
 }
 
 void Video::seek(std::int64_t target_us) {
-    state.seek(target_us);  // seek also block audio thread
-    // we have to call unblock_audio_thread
+    state.seeking_lock(target_us);
 }
 
 bool Video::render() {
@@ -180,7 +179,7 @@ bool Video::render() {
         state.play();
     }
 
-    state.unblock_audio_thread();
+    if (state.is_seeking()) state.seeking_release();
 
     if (!has_video) {
         // We skipped receive because of no video,

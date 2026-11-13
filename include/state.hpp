@@ -123,7 +123,8 @@ class VideoState {
     void pause() { state->paused.store(true); }
     void play() { state->paused.store(false); }
     bool is_seek_available() { return true; }
-    void seek(std::int64_t target_us) {
+    // require a matching `seeking_release`
+    void seeking_lock(std::int64_t target_us) {
         assert(is_seek_available());
 
         auto old_state = std::move(state);
@@ -143,7 +144,9 @@ class VideoState {
         old_state->video_frame_queue.close();
         old_state->audio_frame_queue.close();
     }
-    void unblock_audio_thread() {
+    // return true if you haven't call `seeking_release` after a `seeking_lock`
+    bool is_seeking() { return state->audio_should_wait.load(); }
+    void seeking_release() {
         state->audio_should_wait.store(false);
         state->audio_should_wait.notify_one();
     }
