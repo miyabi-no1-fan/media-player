@@ -20,7 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <limits>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -53,26 +53,10 @@ static_assert(sizeof(vertex_shader) % sizeof(std::uint32_t) == 0);
 static_assert(sizeof(fragment_shader) % sizeof(std::uint32_t) == 0);
 
 void VideoTexture::init() {
-    check_supported_features();
     create_ubo();
     create_image_resources();
     create_descriptors();
     create_pipeline();
-}
-
-void VideoTexture::check_supported_features() {
-    auto prop = renderer.ctx.physical_device->getFormatProperties(vk::Format::eR8Unorm);
-    // `context.cpp` already find for device with R8Unorm that support
-    // this required feature, a check here is just being defensive.
-    auto required = vk::FormatFeatureFlagBits::eSampledImage;
-    if ((prop.linearTilingFeatures & required) != required)
-        throw std::runtime_error("Device does not support required features.");
-
-    auto transfer = vk::FormatFeatureFlagBits::eTransferDst | vk::FormatFeatureFlagBits::eTransferSrc;
-    is_image_transfer_supported = (prop.linearTilingFeatures & transfer) == transfer;
-
-    auto filter = vk::FormatFeatureFlagBits::eSampledImageFilterLinear;
-    is_image_linear_filtering_supported = (prop.linearTilingFeatures & filter) == filter;
 }
 
 void VideoTexture::create_ubo() {
@@ -80,8 +64,7 @@ void VideoTexture::create_ubo() {
     for (auto&& v : ubo) {
         v = std::make_unique<Buffer>(
             renderer.ctx,
-            sizeof(UBO),
-            1,
+            sizeof(UBO), 1,
             vk::BufferUsageFlagBits::eUniformBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
         v->map();
@@ -92,80 +75,62 @@ void VideoTexture::create_ubo() {
     }
 }
 
+std::size_t VideoTexture::get_width(std::size_t plane) {
+    if (plane == 0) return static_cast<std::size_t>(width);
+    return static_cast<std::size_t>(div_ceil(width, 2));
+}
+
+std::size_t VideoTexture::get_height(std::size_t plane) {
+    if (plane == 0) return static_cast<std::size_t>(height);
+    return static_cast<std::size_t>(div_ceil(height, 2));
+}
+
 void VideoTexture::create_image_resources() {
     image_planes.resize(renderer.swap_chain->image_count());
-    mapped_images.resize(renderer.swap_chain->image_count());
-    mapped_image_layouts.resize(renderer.swap_chain->image_count());
+    staging_buffers.resize(renderer.swap_chain->image_count());
     renderer.ctx.single_time_commands([this](const vk::UniqueCommandBuffer& cmd) {
-        for (std::size_t i = 0; i < this->renderer.swap_chain->image_count(); i++) {
-            for (std::size_t p = 0; p < 3; p++) {
-                std::uint32_t width = this->width;
-                std::uint32_t height = this->height;
-                if (p > 0) {
-                    width = div_ceil(width, 2);
-                    height = div_ceil(height, 2);
-                }
-                vk::ImageUsageFlags usage_flags = vk::ImageUsageFlagBits::eSampled;
-                if (is_image_transfer_supported)
-                    usage_flags |= vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc;
+        for (std::size_t i = 0; i < renderer.swap_chain->image_count(); i++) {
+            for (std::size_t p = 0; p < PLANES; p++) {
                 image_planes[i][p] = std::make_unique<Image>(
-                    this->renderer.ctx,
-                    vk::ImageType::e2D,
-                    vk::Format::eR8Unorm,
-                    vk::ImageTiling::eLinear,
-                    vk::Extent3D(width, height, 1),
-                    usage_flags,
-                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-                image_planes[i][p]->transition_image_layout(
-                    cmd,
-                    vk::ImageLayout::eGeneral,
-                    {},
-                    {},
-                    vk::PipelineStageFlagBits::eTopOfPipe,
-                    vk::PipelineStageFlagBits::eAllCommands);
-                image_planes[i][p]->map();
-                mapped_image_layouts[i][p] = this->renderer.ctx.device->getImageSubresourceLayout(
+                    renderer.ctx,
+                    vk::ImageType::e2D, vk::Format::eR8Unorm,
+                    vk::Extent3D(get_width(p), get_height(p), 1),
+                    vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
+                    vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+                vk::ImageMemoryBarrier barrier(
+                    vk::AccessFlagBits::eNone, vk::AccessFlagBits::eNone,
+                    vk::ImageLayout::eUndefined, vk::ImageLayout::eShaderReadOnlyOptimal,
+                    renderer.ctx.graphics_family_index, renderer.ctx.graphics_family_index,
                     *image_planes[i][p]->get_image(),
-                    vk::ImageSubresource{ vk::ImageAspectFlagBits::eColor, 0, 0 });
-                mapped_images[i][p] = static_cast<std::uint8_t*>(image_planes[i][p]->get_mapped_memory());
-                if (is_image_transfer_supported) {
-                    cmd->clearColorImage(
-                        *image_planes[i][p]->get_image(),
-                        image_planes[i][p]->get_layout(),
-                        vk::ClearColorValue(p > 0 ? 0.5f : 0.f, 0.f, 0.f, 0.f),
-                        vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
-                } else {
-                    std::memset(
-                        mapped_images[i][p],
-                        p > 0 ? 128 : 0,
-                        mapped_image_layouts[i][p].size);
-                }
+                    vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+                cmd->pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                                     vk::PipelineStageFlagBits::eBottomOfPipe,
+                                     {}, nullptr, nullptr, barrier);
+
+                staging_buffers[i][p] = std::make_unique<Buffer>(
+                    renderer.ctx,
+                    1, get_height(p) * get_width(p),
+                    vk::BufferUsageFlagBits::eTransferSrc,
+                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+                staging_buffers[i][p]->map();
+
+                std::memset(staging_buffers[i][p]->get_mapped_memory(),
+                            p == 0 ? 0 : 128, staging_buffers[i][p]->get_buffer_size());
             }
         }
     });
 
-    vk::Filter filter =
-        (is_image_linear_filtering_supported)
-            ? vk::Filter::eLinear
-            : vk::Filter::eNearest;
-
     image_sampler = renderer.ctx.device->createSamplerUnique(vk::SamplerCreateInfo(
-        {},
-        filter,
-        filter,
+        {}, vk::Filter::eLinear, vk::Filter::eLinear,
         vk::SamplerMipmapMode::eNearest,
         vk::SamplerAddressMode::eClampToEdge,
         vk::SamplerAddressMode::eClampToEdge,
         vk::SamplerAddressMode::eClampToEdge,
-        0,
-        vk::False,
-        0,
-        vk::False,
-        vk::CompareOp::eNever,
-        0,
-        0,
-        vk::BorderColor::eFloatOpaqueBlack,
-        vk::False));
+        0, vk::False, 0, vk::False, vk::CompareOp::eNever, 0, 0,
+        vk::BorderColor::eFloatOpaqueBlack, vk::False));
 }
 
 void VideoTexture::create_descriptors() {
@@ -182,9 +147,9 @@ void VideoTexture::create_descriptors() {
         descriptor_sets[i] =
             DescriptorWriter(renderer.ctx, *descriptor_set_layout, *renderer.descriptor_pool)
                 .write_buffer(0, ubo[i]->descriptor_info())
-                .write_image(1, image_planes[i][0]->descriptor_info())
-                .write_image(2, image_planes[i][1]->descriptor_info())
-                .write_image(3, image_planes[i][2]->descriptor_info())
+                .write_image(1, image_planes[i][0]->descriptor_info(vk::ImageLayout::eShaderReadOnlyOptimal))
+                .write_image(2, image_planes[i][1]->descriptor_info(vk::ImageLayout::eShaderReadOnlyOptimal))
+                .write_image(3, image_planes[i][2]->descriptor_info(vk::ImageLayout::eShaderReadOnlyOptimal))
                 .build();
     }
 }
@@ -215,7 +180,39 @@ void VideoTexture::create_pipeline() {
 void VideoTexture::update(AVFrame* frame, const mat2x2& transform, std::uint32_t i) {
     update_ubo(transform, i);
     update_image(frame, i);
-    prev_image_index = i;
+}
+
+void VideoTexture::pre(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) {
+    for (std::size_t p = 0; p < PLANES; p++) {
+        vk::ImageMemoryBarrier image_before(
+            vk::AccessFlagBits::eNone, vk::AccessFlagBits::eTransferWrite,
+            vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageLayout::eTransferDstOptimal,
+            renderer.ctx.graphics_family_index, renderer.ctx.graphics_family_index,
+            *image_planes[i][p]->get_image(),
+            vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+        cmd->pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                             vk::PipelineStageFlagBits::eTransfer,
+                             {}, {}, {}, image_before);
+
+        cmd->copyBufferToImage(
+            *staging_buffers[i][p]->get_buffer(),
+            *image_planes[i][p]->get_image(), vk::ImageLayout::eTransferDstOptimal,
+            vk::BufferImageCopy(0, get_width(p), get_height(p),
+                                vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
+                                vk::Offset3D(0, 0, 0), image_planes[i][p]->get_extent()));
+
+        vk::ImageMemoryBarrier image_after(
+            vk::AccessFlagBits::eTransferWrite, vk::AccessFlagBits::eShaderRead,
+            vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal,
+            renderer.ctx.graphics_family_index, renderer.ctx.graphics_family_index,
+            *image_planes[i][p]->get_image(),
+            vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+        cmd->pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                             vk::PipelineStageFlagBits::eFragmentShader,
+                             {}, {}, {}, image_after);
+    }
 }
 
 void VideoTexture::draw(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) {
@@ -275,62 +272,47 @@ void VideoTexture::update_ubo(const mat2x2& A, std::size_t i) {
 }
 
 void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
-    if (frame == nullptr) {
-        if (prev_image_index == std::numeric_limits<std::uint32_t>::max()) return;
-        if (prev_image_index == i) return;
-        renderer.ctx.single_time_commands([this, i](vk::UniqueCommandBuffer& cmd) {
-            for (std::size_t p = 0; p < 3; p++) {
-                if (is_image_transfer_supported) {
-                    const auto& src = image_planes[prev_image_index][p];
-                    const auto& dst = image_planes[i][p];
-                    cmd->copyImage(
-                        *src->get_image(),
-                        src->get_layout(),
-                        *dst->get_image(),
-                        dst->get_layout(),
-                        vk::ImageCopy(
-                            vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                            vk::Offset3D(0, 0, 0),
-                            vk::ImageSubresourceLayers(vk::ImageAspectFlagBits::eColor, 0, 0, 1),
-                            vk::Offset3D(0, 0, 0),
-                            std::min(dst->get_extent(), src->get_extent())));
-                } else {
-                    std::uint8_t* src = mapped_images[prev_image_index][p] + mapped_image_layouts[prev_image_index][p].offset;
-                    std::size_t src_pitch = mapped_image_layouts[prev_image_index][p].rowPitch;
-                    std::uint8_t* dst = mapped_images[i][p] + mapped_image_layouts[i][p].offset;
-                    std::size_t dst_pitch = mapped_image_layouts[i][p].rowPitch;
-                    std::size_t height = std::min(
-                        static_cast<std::size_t>(image_planes[i][p]->get_extent().height),
-                        static_cast<std::size_t>(image_planes[prev_image_index][p]->get_extent().height));
-                    for (std::size_t i = 0; i < height; i++) {
-                        std::memcpy(dst + i * dst_pitch,
-                                    src + i * src_pitch,
-                                    std::min(dst_pitch, src_pitch));
-                    }
+    if (frame == nullptr) return;
+    if (frame->format == AV_PIX_FMT_YUV420P) {
+        for (std::size_t p = 0; p < PLANES; p++) {
+            std::uint8_t* dst = static_cast<std::uint8_t*>(staging_buffers[i][p]->get_mapped_memory());
+            std::size_t dst_stride = get_width(p);
+            std::uint8_t* src = frame->data[p];
+            std::size_t src_stride = static_cast<std::size_t>(frame->linesize[p]);
+            std::size_t h = std::min(get_height(p), static_cast<std::size_t>(p == 0 ? frame->height : div_ceil(frame->height, 2)));
+            std::size_t w = std::min(get_width(p), static_cast<std::size_t>(p == 0 ? frame->width : div_ceil(frame->width, 2)));
+            for (std::size_t i = 0; i < h; i++)
+                std::memcpy(dst + i * dst_stride, src + i * src_stride, w);
+        }
+    } else if (frame->format == AV_PIX_FMT_NV12) {
+        {
+            std::uint8_t* dst = static_cast<std::uint8_t*>(staging_buffers[i][0]->get_mapped_memory());
+            std::size_t dst_stride = get_width(0);
+            std::uint8_t* src = frame->data[0];
+            std::size_t src_stride = static_cast<std::size_t>(frame->linesize[0]);
+            std::size_t h = std::min(get_height(0), static_cast<std::size_t>(frame->height));
+            std::size_t w = std::min(get_width(0), static_cast<std::size_t>(frame->width));
+            for (std::size_t i = 0; i < h; i++)
+                std::memcpy(dst + i * dst_stride, src + i * src_stride, w);
+        }
+        {
+            std::uint8_t* U = static_cast<std::uint8_t*>(staging_buffers[i][1]->get_mapped_memory());
+            std::uint8_t* V = static_cast<std::uint8_t*>(staging_buffers[i][2]->get_mapped_memory());
+            std::size_t U_stride = get_width(1);
+            std::size_t V_stride = get_width(2);
+            std::uint8_t* src = frame->data[1];
+            std::size_t src_stride = static_cast<std::size_t>(frame->linesize[1]);
+            std::size_t h = std::min(std::min(get_height(1), get_height(2)), static_cast<std::size_t>(div_ceil(frame->height, 2)));
+            std::size_t w = std::min(std::min(get_width(1), get_width(2)), static_cast<std::size_t>(div_ceil(frame->width, 2)));
+            for (std::size_t i = 0; i < h; i++) {
+                for (std::size_t j = 0; j < w; j++) {
+                    U[i * U_stride + j] = src[i * src_stride + j * 2 + 0];
+                    V[i * V_stride + j] = src[i * src_stride + j * 2 + 1];
                 }
             }
-        });
-        return;
-    }
-    for (std::size_t p = 0; p < 3; p++) {
-        std::uint8_t* dst = mapped_images[i][p] + mapped_image_layouts[i][p].offset;
-        std::size_t dst_pitch = mapped_image_layouts[i][p].rowPitch;
-
-        std::uint8_t* src = frame->data[p];
-        std::size_t src_pitch = frame->linesize[p];
-
-        std::size_t height = std::min(
-            static_cast<std::size_t>(image_planes[i][p]->get_extent().height),
-            static_cast<std::size_t>(p > 0 ? div_ceil(frame->height, 2) : frame->height));
-        std::size_t width = std::min(
-            static_cast<std::size_t>(image_planes[i][p]->get_extent().width),
-            static_cast<std::size_t>(p > 0 ? div_ceil(frame->width, 2) : frame->width));
-
-        for (std::size_t i = 0; i < height; i++) {
-            std::memcpy(dst + i * dst_pitch,
-                        src + i * src_pitch,
-                        width);
         }
+    } else {
+        throw std::runtime_error("Unknown pixel format.");
     }
     auto* v = static_cast<UBO*>(ubo[i]->get_mapped_memory());
     v->is_color_range_jpeg = frame->color_range == AVCOL_RANGE_JPEG;

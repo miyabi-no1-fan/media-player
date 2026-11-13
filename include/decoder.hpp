@@ -184,16 +184,6 @@ class Decoder {
         return video->decoder->height;
     }
 
-    std::optional<AVPixelFormat> input_pixel_format() const {
-        if (!video) return std::nullopt;
-        return video->decoder->pix_fmt;
-    }
-
-    std::optional<AVPixelFormat> output_pixel_format() const {
-        if (!video) return std::nullopt;
-        return AV_PIX_FMT_YUV420P;
-    }
-
     std::optional<double> fps() const {
         if (video) return av_q2d(ictx->streams[video->stream_index]->avg_frame_rate);
         return std::nullopt;

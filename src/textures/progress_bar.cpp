@@ -102,6 +102,8 @@ void ProgressBar::update(float progress, std::uint32_t i) {
     static_cast<UBO*>(ubo[i]->get_mapped_memory())->progress = progress;
 }
 
+void ProgressBar::pre(const vk::UniqueCommandBuffer&, std::uint32_t) {}
+
 void ProgressBar::draw(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) {
     pipeline->bind(cmd);
     cmd->bindDescriptorSets(

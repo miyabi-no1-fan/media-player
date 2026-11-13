@@ -26,6 +26,11 @@ class Texture {
     Texture() {}
     virtual ~Texture() = default;
     virtual void init() = 0;
+
+    // before begin renderpass
+    virtual void pre(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) = 0;
+
+    // after begin renderpass
     virtual void draw(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) = 0;
 
     Texture(const Texture&) = delete;

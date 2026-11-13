@@ -46,6 +46,7 @@ class ProgressBar : public Texture {
     ProgressBar(Renderer& renderer) : renderer(renderer) {}
     void init() override;
     void update(float progress, std::uint32_t i);
+    void pre(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) override;
     void draw(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) override;
 
    private:

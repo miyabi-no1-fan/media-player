@@ -305,7 +305,7 @@ void Decoder::discard_unused_streams(const std::set<AVMediaType> used_streams) {
 void Decoder::init_filter_descr(const std::string path) {
     std::vector<std::string> descrs;
 
-    descrs.push_back("format=pix_fmts=yuv420p");
+    descrs.push_back("format=pix_fmts=yuv420p|nv12");
 
     if (video) {
         bool has_subtitle = false;
