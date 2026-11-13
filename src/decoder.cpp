@@ -412,7 +412,6 @@ int Decoder::init_filters(Decoder::Filter& filter,
     par->time_base = time_base;
     par->color_range = video.decoder->color_range;
     par->color_space = video.decoder->colorspace;
-    par->alpha_mode = video.decoder->alpha_mode;
     par->frame_rate = video.decoder->framerate;
     if (video.decoder->hw_frames_ctx) {
         par->hw_frames_ctx = av_buffer_ref(video.decoder->hw_frames_ctx);
