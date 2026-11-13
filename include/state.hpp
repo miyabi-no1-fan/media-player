@@ -85,6 +85,10 @@ class State {
     MPMCQueue<UniqueAVFrame> video_frame_queue{ VIDEO_FRAME_QUEUE_BOUND };
     MPMCQueue<UniqueAVFrame> audio_frame_queue{ AUDIO_FRAME_QUEUE_BOUND };
 
+    // `*_packet_queue` use a `*_PACKET_QUEUE_SOFT_LIMIT` implementation
+    // so this is the blocking waker for it
+    std::atomic_bool packet_queue_waker;
+
    public:
     State() {}
     ~State() {
@@ -217,8 +221,16 @@ class DecoderState {
         state->video_packet_queue.close();
         state->audio_packet_queue.close();
     }
-    std::size_t video_packet_queue_len() const { return state->video_packet_queue.size(); }
-    std::size_t audio_packet_queue_len() const { return state->audio_packet_queue.size(); }
+    bool waiting_for_packet_queue() const {
+        if ((!state->video_packet_queue.is_closed() && state->video_packet_queue.size() < VIDEO_PACKET_QUEUE_SOFT_LIMIT) ||
+            (!state->audio_packet_queue.is_closed() && state->audio_packet_queue.size() < AUDIO_PACKET_QUEUE_SOFT_LIMIT))
+            return false;
+        if (!state->video_packet_queue.is_closed() || !state->audio_packet_queue.is_closed()) {
+            state->packet_queue_waker.store(false);
+            state->packet_queue_waker.wait(false);
+        }
+        return true;
+    }
     std::int64_t current_us() { return state->current_us.load(); }
     bool is_seek() const { return state->decoder_seek_req.load(); }
     // return the target_us
@@ -243,7 +255,12 @@ class SubDecoderVideoState {
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->video_frame_queue.push(std::move(frame)); }
-    std::optional<UniqueAVPacket> recv() { return state->video_packet_queue.pop(); }
+    std::optional<UniqueAVPacket> recv() {
+        auto res = state->video_packet_queue.pop();
+        state->packet_queue_waker.store(true);
+        state->packet_queue_waker.notify_one();
+        return res;
+    }
     void error(int e) { state->sub_decode_video_status.store(e); }
 };
 
@@ -259,6 +276,11 @@ class SubDecoderAudioState {
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->audio_frame_queue.push(std::move(frame)); }
-    std::optional<UniqueAVPacket> recv() { return state->audio_packet_queue.pop(); }
+    std::optional<UniqueAVPacket> recv() {
+        auto res = state->audio_packet_queue.pop();
+        state->packet_queue_waker.store(true);
+        state->packet_queue_waker.notify_one();
+        return res;
+    }
     void error(int e) { state->sub_decode_audio_status.store(e); }
 };

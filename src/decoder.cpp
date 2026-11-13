@@ -21,7 +21,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -83,7 +82,7 @@ std::jthread Decoder::launch() {
                 if (should_quit) break;
             }
 
-            while (video || audio) {
+            while ((video || audio) && state.waiting_for_packet_queue()) {
                 if (state.is_seek()) {
                     state.handle_seek();
 
@@ -116,15 +115,6 @@ std::jthread Decoder::launch() {
 
                 if (state.sub_decode_video_status() < 0) video = nullptr;
                 if (state.sub_decode_audio_status() < 0) audio = nullptr;
-
-                unsigned long v = std::numeric_limits<unsigned long>::max();
-                if (video) v = state.video_packet_queue_len();
-                unsigned long a = std::numeric_limits<unsigned long>::max();
-                if (audio) a = state.audio_packet_queue_len();
-                if (v <= VIDEO_PACKET_QUEUE_SOFT_LIMIT || a <= AUDIO_PACKET_QUEUE_SOFT_LIMIT) {
-                    break;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
     });
