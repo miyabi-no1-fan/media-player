@@ -23,6 +23,7 @@ extern "C" {
 #include <libavfilter/avfilter.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/buffer.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/frame.h>
 #include <libavutil/log.h>
@@ -66,6 +67,10 @@ using UniqueAVPacket = std::unique_ptr<AVPacket, AVPacketDeleter>;
 
 class Decoder {
     AVFormatContext* ictx = nullptr;
+
+    bool hardware_accel_feature = true;
+    AVBufferRef* hw_device_ctx = nullptr;
+    AVPixelFormat hw_pix_fmt;
 
     std::string filter_descr;
     struct Filter {
@@ -168,6 +173,7 @@ class Decoder {
 
     ~Decoder() {
         avformat_close_input(&ictx);
+        av_buffer_unref(&hw_device_ctx);
     }
 
     bool has_video() const { return video != nullptr; }
@@ -242,7 +248,8 @@ class Decoder {
     }
 
    private:
-    std::optional<Stream> new_stream(AVMediaType type) const;
+    std::optional<Stream> new_stream(AVMediaType type);
+    bool init_hw_decoder(const AVCodec* codec, AVHWDeviceType type);
     void init_filter_descr(const std::string path);
     void discard_unused_streams(const std::set<AVMediaType> used_streams);
     std::int64_t start_time_us() const { return ictx->start_time == AV_NOPTS_VALUE ? 0 : ictx->start_time; }

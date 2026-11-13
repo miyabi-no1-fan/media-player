@@ -24,6 +24,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -31,6 +32,7 @@
 #include <vector>
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavcodec/codec.h>
 #include <libavcodec/defs.h>
 #include <libavcodec/packet.h>
 #include <libavfilter/avfilter.h>
@@ -38,7 +40,9 @@ extern "C" {
 #include <libavfilter/buffersrc.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/buffer.h>
 #include <libavutil/frame.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
@@ -277,19 +281,82 @@ int Decoder::resample_audio(const Decoder::AudioStream& audio, UniqueAVFrame& ou
     return 0;
 }
 
-std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) const {
+static AVPixelFormat _hw_pix_fmt;
+
+static AVPixelFormat get_hw_format(AVCodecContext*, const enum AVPixelFormat* pix_fmts) {
+    const enum AVPixelFormat* p;
+    for (p = pix_fmts; *p != -1; p++) {
+        if (*p == _hw_pix_fmt)
+            return *p;
+    }
+    throw std::runtime_error("Failed to get HW surface format.");
+    return AV_PIX_FMT_NONE;
+}
+
+bool Decoder::init_hw_decoder(const AVCodec* codec, AVHWDeviceType type) {
+    for (int i = 0;; i++) {
+        const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
+        if (!config) return false;
+        if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
+            config->device_type == type) {
+            hw_pix_fmt = config->pix_fmt;
+            _hw_pix_fmt = hw_pix_fmt;
+            break;
+        }
+    }
+
+    if (av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0) < 0) {
+        hw_device_ctx = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
+std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
     const AVCodec* codec = nullptr;
     int index = av_find_best_stream(ictx, type, -1, -1, &codec, 0);
     if (index < 0 || codec == nullptr)
         return std::nullopt;
+
     AVCodecContext* decoder = avcodec_alloc_context3(codec);
-    decoder->thread_count = 4;
-    decoder->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
-    if (avcodec_parameters_to_context(decoder, ictx->streams[index]->codecpar) < 0 ||
-        avcodec_open2(decoder, codec, nullptr) < 0) {
+
+    if (avcodec_parameters_to_context(decoder, ictx->streams[index]->codecpar) < 0) {
         avcodec_free_context(&decoder);
         return std::nullopt;
     }
+
+    if (type == AVMEDIA_TYPE_VIDEO) {
+        if (!hw_device_ctx && hardware_accel_feature) {
+            AVHWDeviceType hw_dev_type = AV_HWDEVICE_TYPE_NONE;
+            while ((hw_dev_type = av_hwdevice_iterate_types(hw_dev_type)) != AV_HWDEVICE_TYPE_NONE) {
+                if (init_hw_decoder(codec, hw_dev_type)) {
+                    break;
+                }
+            }
+
+            if (!hw_device_ctx) {
+                #ifndef NDEBUG
+                std::cout << "No hardware decoding available for this media" << std::endl;
+                #endif
+                hardware_accel_feature = false;
+            }
+        }
+
+        if (hw_device_ctx) {
+            decoder->hw_device_ctx = av_buffer_ref(hw_device_ctx);
+            decoder->get_format = get_hw_format;
+        } else {
+            decoder->thread_count = 4;
+            decoder->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+        }
+    }
+
+    if (avcodec_open2(decoder, codec, nullptr) < 0) {
+        avcodec_free_context(&decoder);
+        return std::nullopt;
+    }
+
     return Stream(index, codec, decoder);
 }
 
@@ -304,6 +371,8 @@ void Decoder::discard_unused_streams(const std::set<AVMediaType> used_streams) {
 
 void Decoder::init_filter_descr(const std::string path) {
     std::vector<std::string> descrs;
+
+    if (hw_device_ctx) descrs.push_back("hwdownload");
 
     descrs.push_back("format=pix_fmts=yuv420p|nv12");
 
@@ -322,17 +391,16 @@ void Decoder::init_filter_descr(const std::string path) {
     }
 }
 
-// copy from https://github.com/FFmpeg/FFmpeg/blob/master/doc/examples/decode_filter_video.c
 int Decoder::init_filters(Decoder::Filter& filter,
                           const Decoder::VideoStream& video,
                           AVRational time_base,
                           const std::string& filter_descr) {
-    char args[512];
     int ret = 0;
     const AVFilter* buffersrc = avfilter_get_by_name("buffer");
     const AVFilter* buffersink = avfilter_get_by_name("buffersink");
     AVFilterInOut* outputs = avfilter_inout_alloc();
     AVFilterInOut* inputs = avfilter_inout_alloc();
+    AVBufferSrcParameters* par = nullptr;
 
     filter.graph = avfilter_graph_alloc();
     if (!outputs || !inputs || !filter.graph) {
@@ -340,23 +408,44 @@ int Decoder::init_filters(Decoder::Filter& filter,
         goto end;
     }
 
-    /* buffer video source: the decoded frames from the decoder will be inserted here. */
-    snprintf(args,
-             sizeof(args),
-             "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d:colorspace=%s:range=%s",
-             video.decoder->width,
-             video.decoder->height,
-             video.decoder->pix_fmt,
-             time_base.num,
-             time_base.den,
-             video.decoder->sample_aspect_ratio.num,
-             video.decoder->sample_aspect_ratio.den,
-             av_color_space_name(video.decoder->colorspace),
-             av_color_range_name(video.decoder->color_range));
+    filter.buffersrc_ctx = avfilter_graph_alloc_filter(filter.graph, buffersrc, "in");
+    if (!filter.buffersrc_ctx) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot allocate buffer source\n");
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
 
-    ret = avfilter_graph_create_filter(&filter.buffersrc_ctx, buffersrc, "in", args, NULL, filter.graph);
+    par = av_buffersrc_parameters_alloc();
+    if (!par) {
+        ret = AVERROR(ENOMEM);
+        goto end;
+    }
+
+    par->width = video.decoder->width;
+    par->height = video.decoder->height;
+    par->format = video.decoder->pix_fmt;
+    par->time_base = time_base;
+    par->color_range = video.decoder->color_range;
+    par->color_space = video.decoder->colorspace;
+    par->alpha_mode = video.decoder->alpha_mode;
+    par->frame_rate = video.decoder->framerate;
+    if (video.decoder->hw_frames_ctx) {
+        par->hw_frames_ctx = av_buffer_ref(video.decoder->hw_frames_ctx);
+        if (!par->hw_frames_ctx) {
+            ret = AVERROR(ENOMEM);
+            goto end;
+        }
+    }
+
+    ret = av_buffersrc_parameters_set(filter.buffersrc_ctx, par);
     if (ret < 0) {
-        av_log(NULL, AV_LOG_ERROR, "Cannot create buffer source\n");
+        av_log(NULL, AV_LOG_ERROR, "Cannot set buffer source parameters\n");
+        goto end;
+    }
+
+    ret = avfilter_init_str(filter.buffersrc_ctx, nullptr);
+    if (ret < 0) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot initialize buffer source\n");
         goto end;
     }
 
@@ -408,6 +497,10 @@ int Decoder::init_filters(Decoder::Filter& filter,
         goto end;
 
 end:
+    if (par) {
+        av_buffer_unref(&par->hw_frames_ctx);
+        av_freep(&par);
+    }
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
 
