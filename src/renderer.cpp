@@ -116,6 +116,10 @@ void Renderer::record_command_buffer(std::uint32_t i) {
         auto& cmd = command_buffers[i].second;
         cmd->begin(vk::CommandBufferBeginInfo());
 
+        for (auto* texture : textures) {
+            texture->pre(cmd, i);
+        }
+
         vk::ClearValue clear_values[2];
         clear_values[0].color = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 0.0f);
         clear_values[1].depthStencil = vk::ClearDepthStencilValue(1.0f, 0);

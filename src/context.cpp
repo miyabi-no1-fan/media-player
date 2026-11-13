@@ -81,12 +81,8 @@ bool Context::is_device_suitable(const vk::PhysicalDevice& physical_device) {
 
     auto suppored_features = physical_device.getFeatures();
 
-    auto format_properties = physical_device.getFormatProperties(vk::Format::eR8Unorm);
-    auto needed_format_properties = vk::FormatFeatureFlagBits::eSampledImage;
-
     return indices.is_complete() && extensions_supported &&
-           swap_chain_adequate && suppored_features.samplerAnisotropy &&
-           (format_properties.linearTilingFeatures & needed_format_properties) == needed_format_properties;
+           swap_chain_adequate && suppored_features.samplerAnisotropy;
 }
 
 Context::QueueFamilyIndices Context::find_queue_families(const vk::PhysicalDevice& physical_device) {

@@ -37,14 +37,12 @@ Image::Image(
     const Context& ctx,
     vk::ImageType type,
     vk::Format format,
-    vk::ImageTiling tiling,
     vk::Extent3D extent,
     vk::ImageUsageFlags usage_flags,
     vk::MemoryPropertyFlags memory_property_flags)
     : ctx(&ctx),
       type(type),
       format(format),
-      layout(vk::ImageLayout::eUndefined),
       extent(extent),
       usage_flags(usage_flags),
       memory_property_flags(memory_property_flags) {
@@ -58,7 +56,7 @@ Image::Image(
                 1,
                 1,
                 vk::SampleCountFlagBits::e1,
-                tiling,
+                vk::ImageTiling::eOptimal,
                 usage_flags,
                 vk::SharingMode::eExclusive,
                 ctx.graphics_family_index,
@@ -123,7 +121,7 @@ void Image::invalidate(vk::DeviceSize size, vk::DeviceSize offset) {
 /**
  * Create a image info descriptor
  */
-vk::DescriptorImageInfo Image::descriptor_info(const vk::UniqueSampler& sampler) {
+vk::DescriptorImageInfo Image::descriptor_info(vk::ImageLayout layout, const vk::UniqueSampler& sampler) {
     return vk::DescriptorImageInfo(
         *sampler,
         *view,
