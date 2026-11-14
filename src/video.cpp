@@ -152,6 +152,12 @@ bool Video::render() {
 
             std::int64_t pts = av_rescale_q(frame->pts, frame->time_base, AV_TIME_BASE_Q);
 
+            if (state.is_seeking()) {
+                state.first_frame_after_seek_pts(pts);
+                decoded = std::move(frame);
+                break;
+            }
+
             std::int64_t target = state.current_us();
 
             if (pts < target - frame_time_us) {

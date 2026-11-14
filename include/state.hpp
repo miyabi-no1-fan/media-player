@@ -76,6 +76,8 @@ class State {
     // So this flag is to fix the issue.
     std::atomic_bool audio_should_wait = false;
 
+    std::atomic_bool sub_decode_video_should_send_late_frames = false;
+
     // hold an AVERROR code if < 0
     std::atomic_int sub_decode_video_status = 0;
     std::atomic_int sub_decode_audio_status = 0;
@@ -137,6 +139,7 @@ class VideoState {
         state = std::make_shared<State>();
         state->current_us.store(target_us);
         state->audio_should_wait.store(true);
+        state->sub_decode_video_should_send_late_frames.store(true);
         global_state.store(state);
 
         old_state->decoder_seek_req.store(true);
@@ -155,8 +158,12 @@ class VideoState {
     // return true if you haven't call `seeking_release` after a `seeking_lock`
     bool is_seeking() { return state->audio_should_wait.load(); }
     void seeking_release() {
+        state->sub_decode_video_should_send_late_frames.store(false);
         state->audio_should_wait.store(false);
         state->audio_should_wait.notify_one();
+    }
+    void first_frame_after_seek_pts(std::int64_t us) {
+        state->current_us.store(us);
     }
     std::optional<UniqueAVFrame> recv() { return state->video_frame_queue.pop(); }
     void close_queue() { state->video_frame_queue.close(); }
@@ -264,6 +271,7 @@ class SubDecoderVideoState {
         state->packet_queue_waker.notify_one();
     }
     std::int64_t current_us() { return state->current_us.load(); }
+    bool should_send_late_frame() const { return state->sub_decode_video_should_send_late_frames.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->video_frame_queue.push(std::move(frame)); }
     std::optional<UniqueAVPacket> recv() {
         auto res = state->video_packet_queue.pop();

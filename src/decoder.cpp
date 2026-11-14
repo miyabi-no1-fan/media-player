@@ -143,7 +143,7 @@ std::jthread Decoder::launch_video_decoder() const {
 
                 decoded->pts = decoded->best_effort_timestamp;
 
-                if (decoded->pts >= target_pts) {
+                if (state.should_send_late_frame() || decoded->pts >= target_pts) {
                     TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, decoded.get(), 0));
                     while (1) {
                         UniqueAVFrame filtered(av_frame_alloc());
