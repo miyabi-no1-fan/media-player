@@ -1,11 +1,9 @@
 # media-player
 
 ## Support platforms
-- OS: Linux
-- Architecture: x86_64
+We _think_ that it should still gonna work on most Linux and Windows, but we never test all of them so we can't guarantee that it's gonna work for your case.
 
-Other platforms might still work, but never tested.
-Open an issue if you want support on your platform.
+You can open an issue if you want it to work for your case, we'll make it work for ya.
 
 ## Dependencies
 - Vulkan
