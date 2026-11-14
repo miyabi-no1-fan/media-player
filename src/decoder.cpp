@@ -82,7 +82,7 @@ std::jthread Decoder::launch() {
                     state.handle_seek();
 
                     std::int64_t ts = state.current_us() + start_time_us();
-                    avformat_seek_file(ictx, -1, 0, ts, ts, 0);
+                    avformat_seek_file(ictx, -1, INT64_MIN, ts, ts, 0);
 
                     if (video_thrd.joinable()) {
                         video_thrd.request_stop();
