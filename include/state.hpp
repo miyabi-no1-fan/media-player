@@ -230,11 +230,11 @@ class DecoderState {
         state->audio_packet_queue.close();
     }
     bool waiting_for_packet_queue() const {
+        state->packet_queue_waker.store(false);
         if ((!state->video_packet_queue.is_closed() && state->video_packet_queue.size() < VIDEO_PACKET_QUEUE_SOFT_LIMIT) ||
             (!state->audio_packet_queue.is_closed() && state->audio_packet_queue.size() < AUDIO_PACKET_QUEUE_SOFT_LIMIT))
             return false;
         if (!state->video_packet_queue.is_closed() || !state->audio_packet_queue.is_closed()) {
-            state->packet_queue_waker.store(false);
             state->packet_queue_waker.wait(false);
         }
         return true;
