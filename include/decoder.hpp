@@ -148,10 +148,12 @@ class Decoder {
     std::shared_ptr<AudioStream> audio = nullptr;
 
    public:
-    Decoder(const char* path) {
+    Decoder(const char* path, bool disable_hwdec) {
         #ifdef NDEBUG
         av_log_set_level(AV_LOG_ERROR);
         #endif
+
+        hardware_accel_feature = !disable_hwdec;
 
         if (avformat_open_input(&ictx, path, nullptr, nullptr) < 0 ||
             avformat_find_stream_info(ictx, nullptr) < 0) {

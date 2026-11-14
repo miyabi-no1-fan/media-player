@@ -50,7 +50,8 @@ static constexpr char USAGE[] =
     "           vertically   | v        Flip the video vertically\n"
     "    --no-video                     Don't play video\n"
     "    --no-audio                     Don't play audio\n"
-    "    --no-window                    Don't open window, this also mean no video\n";
+    "    --no-window                    Don't open window, this also mean no video\n"
+    "    --no-hwdec                     Disable hardware-accelerated video decoding\n";
 
 struct Info {
     std::string path;
@@ -59,6 +60,7 @@ struct Info {
     bool no_video = false;
     bool no_audio = false;
     bool no_window = false;
+    bool no_hwdec = false;
 };
 
 Info parse(int argc, const char* argv[]);
@@ -71,7 +73,7 @@ int main(int argc, const char* argv[]) try {
     for (int i = 0; i < info.loop; i++) {
         new_state();
 
-        Decoder decoder(info.path.c_str());
+        Decoder decoder(info.path.c_str(), info.no_hwdec);
         if (info.no_video ||
             info.no_window) decoder.no_video();
         if (info.no_audio) decoder.no_audio();
@@ -205,6 +207,10 @@ Info parse(int argc, const char* argv[]) {
             else if (arg == "--no-window") {
                 info.no_window = true;
                 info.no_video = true;
+            }
+
+            else if (arg == "--no-hwdec") {
+                info.no_hwdec = true;
             }
 
             else if (info.path.empty()) {
