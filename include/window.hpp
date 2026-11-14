@@ -49,7 +49,7 @@ class Window {
     std::uint32_t get_height() const { return height; }
     vk::Extent2D get_extent() const { return vk::Extent2D(width, height); }
     const std::string& get_name() const { return name; }
-    double get_frame_time() const { return frame_time.count(); }
+    double get_frame_time() const { return std::chrono::duration<double>(frame_time).count(); }
     GLFWwindow* get_window() const { return window; }
 
     bool should_close() const { return glfwWindowShouldClose(window) == GLFW_TRUE; }
