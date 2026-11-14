@@ -66,6 +66,22 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         std::size_t len = static_cast<std::size_t>(frame->nb_samples) *
                           static_cast<std::size_t>(frame->ch_layout.nb_channels);
 
+        if (frame->pts != AV_NOPTS_VALUE) {
+            std::int64_t pts = av_rescale_q(frame->pts, frame->time_base, AV_TIME_BASE_Q);
+            std::int64_t target = self.state.current_us();
+
+            if (pts < target - sample_time_us) {
+                // too late
+                continue;
+            } else if (pts > target + sample_time_us) {
+                // too early
+                while (pts > target + sample_time_us) {
+                    self.state.next_current_us(sample_time_us);
+                    target = self.state.current_us();
+                }
+            }
+        }
+
         self.queue<T>().append_range(std::span<T>(samples, len));
     }
 

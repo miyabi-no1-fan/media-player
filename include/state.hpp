@@ -176,6 +176,7 @@ class AudioState {
     ~AudioState() { close_queue(); }
     void init() { state = global_state.load(); }
     bool is_paused() const { return state->paused.load(); }
+    std::int64_t current_us() const { return state->current_us.load(); }
     void next_current_us(std::int64_t step) {
         state->current_us.fetch_add(step);
         state->current_us.notify_all();

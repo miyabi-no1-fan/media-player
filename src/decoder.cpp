@@ -210,10 +210,15 @@ std::jthread Decoder::launch_audio_decoder() const {
                 std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us,
                                                        AV_TIME_BASE_Q, time_base);
 
+                decoded->pts = decoded->best_effort_timestamp;
+
                 if (decoded->pts >= target_pts) {
                     if (audio->swr) {
                         UniqueAVFrame out(av_frame_alloc());
                         TRY(resample_audio(*audio, out, decoded));
+                        out->time_base = time_base;
+                        out->pts = decoded->pts;
+                        out->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
                         if (state.send(std::move(out)) != std::nullopt) return;
                     } else {
                         if (state.send(std::move(decoded)) != std::nullopt) return;
@@ -240,6 +245,7 @@ std::jthread Decoder::launch_audio_decoder() const {
                 UniqueAVFrame out(av_frame_alloc());
                 TRY(resample_audio(*audio, out, nullptr));
                 if (out->nb_samples == 0) break;
+                out->pts = AV_NOPTS_VALUE;
                 if (state.send(std::move(out)) != std::nullopt) return;
                 if (should_stop.stop_requested()) return;
             }
