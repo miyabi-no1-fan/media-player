@@ -66,7 +66,7 @@ class SwapChain {
     std::uint32_t width() const { return swap_chain_extent.width; }
     std::uint32_t height() const { return swap_chain_extent.height; }
 
-    vk::Result acquire_next_image(std::uint32_t& image_index);
+    std::uint32_t acquire_next_image();
     vk::Result submit_command_buffer(const vk::UniqueCommandBuffer& cmd, std::uint32_t image_index);
 
     vk::Format find_depth_format();

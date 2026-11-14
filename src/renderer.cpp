@@ -21,8 +21,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <stdexcept>
-#include <string>
 #include <utility>
 #include <vulkan/vulkan.hpp>
 
@@ -88,27 +86,29 @@ void Renderer::invalidate_command_buffers() {
 }
 
 std::optional<std::uint32_t> Renderer::acquire_next_frame() {
-    std::uint32_t i;
-    vk::Result res = swap_chain->acquire_next_image(i);
-    if (res == vk::Result::eErrorOutOfDateKHR) {
+    try {
+        std::uint32_t i = swap_chain->acquire_next_image();
+        return i;
+    } catch (const vk::OutOfDateKHRError&) {
+        window.reset_window_resized_flag();
         create_swap_chain();
         invalidate_command_buffers();
         return {};
     }
-    if (res != vk::Result::eSuccess && res != vk::Result::eSuboptimalKHR) {
-        throw std::runtime_error("Can't acquire swap chain image. Vulkan Error code: " + std::to_string((int)res));
-    }
-    return i;
 }
 
 void Renderer::submit_frame(std::uint32_t i) {
-    auto res = swap_chain->submit_command_buffer(command_buffers[i].second, i);
-    if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR || window.was_window_resized()) {
+    try {
+        auto res = swap_chain->submit_command_buffer(command_buffers[i].second, i);
+        if (res == vk::Result::eSuboptimalKHR || window.was_window_resized()) {
+            window.reset_window_resized_flag();
+            create_swap_chain();
+            invalidate_command_buffers();
+        }
+    } catch (const vk::OutOfDateKHRError&) {
         window.reset_window_resized_flag();
         create_swap_chain();
         invalidate_command_buffers();
-    } else if (res != vk::Result::eSuccess) {
-        throw std::runtime_error("Can't present swap chain image. Vulkan Error code: " + std::to_string((int)res));
     }
 }
 

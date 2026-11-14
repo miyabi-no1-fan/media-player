@@ -38,7 +38,7 @@ SwapChain::SwapChain(const Context& ctx, vk::Extent2D extent, const SwapChain* o
     create_sync_objects();
 }
 
-vk::Result SwapChain::acquire_next_image(std::uint32_t& image_index) {
+std::uint32_t SwapChain::acquire_next_image() {
     auto res = ctx.device->waitForFences(
         *in_flight_fences[current_frame],
         vk::True,
@@ -46,14 +46,11 @@ vk::Result SwapChain::acquire_next_image(std::uint32_t& image_index) {
     if (res != vk::Result::eSuccess)
         throw std::runtime_error("SwapChain::acquire_next_image: waitForFences failed. Vulkan Error code: " + std::to_string((int)res));
 
-    res = ctx.device->acquireNextImageKHR(
-        *swap_chain,
-        std::numeric_limits<std::uint64_t>::max(),
-        *image_available_semaphores[current_frame],
-        {},
-        &image_index);
-
-    return res;
+    return ctx.device->acquireNextImageKHR(
+                         *swap_chain,
+                         std::numeric_limits<std::uint64_t>::max(),
+                         *image_available_semaphores[current_frame], nullptr)
+        .value;
 }
 
 vk::Result SwapChain::submit_command_buffer(const vk::UniqueCommandBuffer& buffer, std::uint32_t image_index) {
