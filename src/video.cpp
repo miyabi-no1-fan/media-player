@@ -160,6 +160,7 @@ bool Video::render() {
                 continue;
             } else if (pts > target + frame_time_us) {
                 // overrun
+                if (state.is_seeking()) state.seeking_release();
                 while (pts > target + frame_time_us) {
                     state.wait_for_clock();
                     target = state.current_us();
