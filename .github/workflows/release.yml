@@ -12,9 +12,7 @@ env:
 
 jobs:
   ubuntu_build:
-    # https://github.blog/changelog/2026-09-17-ubuntu-26-generally-available-and-latest-migration
-    # should be `ubuntu-latest` after November 19, 2026.
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     env:
       ARCHIVE: ${{ github.event.repository.name }}-${{ github.ref_name }}-ubuntu-x86_64
     steps:
