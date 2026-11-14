@@ -56,6 +56,7 @@ void Renderer::create_swap_chain() {
         old_swap_chain &&
         (!old_swap_chain->cmpeq_swap_formats(*swap_chain) ||
          old_swap_chain->image_count() != swap_chain->image_count())) {
+        create_descriptor_pool();
         create_command_buffers();
         for (auto* texture : textures) {
             texture->init();
