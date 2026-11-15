@@ -170,6 +170,7 @@ jobs:
         run: |
           mkdir -p "$ARCHIVE"
           cp "build/release/$PROJECT" "$ARCHIVE/"
+          cp "$FFMPEG_DIR/bin/*.dll" -t "$ARCHIVE/"
           tar -czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           sha256sum "$ARCHIVE.tar.gz" > "$ARCHIVE.tar.gz.sha256"
 
