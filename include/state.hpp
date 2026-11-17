@@ -120,7 +120,9 @@ class VideoState {
 
    public:
     VideoState() = default;
-    ~VideoState() { state->video_frame_queue.close(); }
+    ~VideoState() {
+        if (state) close_queue();
+    }
     void init() { state = global_state.load(); }
     std::int64_t current_us() const { return state->current_us.load(); }
     void wait_for_clock() const { state->current_us.wait(current_us()); }
@@ -173,7 +175,9 @@ class AudioState {
 
    public:
     AudioState() = default;
-    ~AudioState() { close_queue(); }
+    ~AudioState() {
+        if (state) close_queue();
+    }
     void init() { state = global_state.load(); }
     bool is_paused() const { return state->paused.load(); }
     std::int64_t current_us() const { return state->current_us.load(); }
@@ -222,7 +226,9 @@ class DecoderState {
    public:
     DecoderState() = default;
     void init() { state = global_state.load(); }
-    ~DecoderState() { close_connection(); }
+    ~DecoderState() {
+        if (state) close_connection();
+    }
     std::optional<UniqueAVPacket> send_video_packet(UniqueAVPacket packet) { return state->video_packet_queue.push(std::move(packet)); }
     std::optional<UniqueAVPacket> send_audio_packet(UniqueAVPacket packet) { return state->audio_packet_queue.push(std::move(packet)); }
     void close_connection() {
@@ -258,10 +264,12 @@ class SubDecoderVideoState {
     SubDecoderVideoState() = default;
     void init() { state = global_state.load(); }
     ~SubDecoderVideoState() {
-        state->video_packet_queue.close();
-        state->video_frame_queue.close();
-        state->packet_queue_waker.store(true);
-        state->packet_queue_waker.notify_one();
+        if (state) {
+            state->video_packet_queue.close();
+            state->video_frame_queue.close();
+            state->packet_queue_waker.store(true);
+            state->packet_queue_waker.notify_one();
+        }
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->video_frame_queue.push(std::move(frame)); }
@@ -281,10 +289,12 @@ class SubDecoderAudioState {
     SubDecoderAudioState() = default;
     void init() { state = global_state.load(); }
     ~SubDecoderAudioState() {
-        state->audio_packet_queue.close();
-        state->audio_frame_queue.close();
-        state->packet_queue_waker.store(true);
-        state->packet_queue_waker.notify_one();
+        if (state) {
+            state->audio_packet_queue.close();
+            state->audio_frame_queue.close();
+            state->packet_queue_waker.store(true);
+            state->packet_queue_waker.notify_one();
+        }
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->audio_frame_queue.push(std::move(frame)); }
