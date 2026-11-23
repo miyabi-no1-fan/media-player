@@ -156,10 +156,7 @@ class VideoState {
     }
     // return true if you haven't call `seeking_release` after a `seeking_lock`
     bool is_seeking() { return state->audio_should_wait.load(); }
-    void seeking_release() {
-        state->audio_should_wait.store(false);
-        state->audio_should_wait.notify_one();
-    }
+    void seeking_release() { state->audio_should_wait.store(false); }
     std::optional<UniqueAVFrame> recv() { return state->video_frame_queue.pop(); }
     void close_queue() { state->video_frame_queue.close(); }
     bool has_all_queue_ended() {
@@ -179,7 +176,7 @@ class AudioState {
         if (state) close_queue();
     }
     void init() { state = global_state.load(); }
-    bool is_paused() const { return state->paused.load(); }
+    bool is_paused() const { return state->paused.load() || state->audio_should_wait.load(); }
     std::int64_t current_us() const { return state->current_us.load(); }
     void next_current_us(std::int64_t step) {
         state->current_us.fetch_add(step);
@@ -190,7 +187,6 @@ class AudioState {
         assert(is_seek());
         state = global_state.load();
     }
-    void wait_video() { state->audio_should_wait.wait(true); }
     std::optional<UniqueAVFrame> recv() { return state->audio_frame_queue.pop(); }
     void close_queue() { state->audio_frame_queue.close(); }
 };
@@ -204,7 +200,6 @@ inline std::jthread handle_no_audio_play() {
         state.close_queue();
         time_point<steady_clock> next = steady_clock::now() + step;
         while (!should_stop.stop_requested()) {
-            state.wait_video();
             if (!state.is_paused()) {
                 state.next_current_us(step.count());
                 if (state.is_seek()) state.handle_seek();

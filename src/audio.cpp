@@ -40,8 +40,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     Audio& self = *static_cast<Audio*>(user_data);
     T* buffer = static_cast<T*>(output_buffer);
 
-    self.state.wait_video();
-
     const std::size_t needed = static_cast<std::size_t>(nbuffer_frames) *
                                static_cast<std::size_t>(self.channels);
     const std::int64_t sample_time_us = (static_cast<std::int64_t>(nbuffer_frames) * AV_TIME_BASE) /
