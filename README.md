@@ -1,17 +1,15 @@
 # media-player
 
 ## Support platforms
-We _think_ that it should still gonna work on most Linux and Windows, but we never test all of them so we can't guarantee that it's gonna work for your case.
-
-You can open an issue if you want it to work for your case, we'll make it work for ya.
+- OS: Linux, Windows
+- Architecture: x86-64
 
 ## Dependencies
 - Vulkan
 - FFmpeg
 
 ## Install
-We have pre-built binaries in releases.
-Just make sure that you have installed FFmpeg then it should work.
+We have pre-built binaries in releases. Just make sure that you have installed FFmpeg then it should work.
 
 If you build from source:
 - Make sure you have installed the Ninja generator and Vulkan SDK 1.4.350 or newer
