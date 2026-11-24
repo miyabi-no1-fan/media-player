@@ -148,6 +148,10 @@ jobs:
           echo "INCLUDE=$dir\include" >> $env:GITHUB_ENV
           echo "LIB=$dir\lib" >> $env:GITHUB_ENV
 
+      - name: Upgrade LLVM
+        run: |
+          choco upgrade llvm -y
+
       - name: Install Vulkan SDK
         shell: pwsh
         run: |
