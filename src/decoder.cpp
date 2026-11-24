@@ -40,6 +40,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/buffer.h>
+#include <libavutil/dict.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/mathematics.h>
@@ -392,6 +393,7 @@ int Decoder::init_filters(Decoder::Filter& filter,
     AVFilterInOut* outputs = avfilter_inout_alloc();
     AVFilterInOut* inputs = avfilter_inout_alloc();
     AVBufferSrcParameters* par = nullptr;
+    AVDictionary* par_str = nullptr;
 
     filter.graph = avfilter_graph_alloc();
     if (!outputs || !inputs || !filter.graph) {
@@ -412,13 +414,19 @@ int Decoder::init_filters(Decoder::Filter& filter,
         goto end;
     }
 
+    // use par_str for param that are new and might not be available on older ffmpeg version
+    // otherwise just use par for convenient
     par->width = video.decoder->width;
     par->height = video.decoder->height;
+    par->sample_aspect_ratio = video.decoder->sample_aspect_ratio;
     par->format = video.decoder->pix_fmt;
     par->time_base = time_base;
     par->color_range = video.decoder->color_range;
     par->color_space = video.decoder->colorspace;
     par->frame_rate = video.decoder->framerate;
+    // `AVCodecContext.alpha_mode` is not on ffmpeg 7.x
+    // av_dict_set_int(&par_str, "alpha_mode", video.decoder->alpha_mode, 0);
+    av_dict_set_int(&par_str, "chroma_location", video.decoder->chroma_sample_location, 0);
     if (video.decoder->hw_frames_ctx) {
         par->hw_frames_ctx = av_buffer_ref(video.decoder->hw_frames_ctx);
         if (!par->hw_frames_ctx) {
@@ -433,7 +441,7 @@ int Decoder::init_filters(Decoder::Filter& filter,
         goto end;
     }
 
-    ret = avfilter_init_str(filter.buffersrc_ctx, nullptr);
+    ret = avfilter_init_dict(filter.buffersrc_ctx, &par_str);
     if (ret < 0) {
         av_log(NULL, AV_LOG_ERROR, "Cannot initialize buffer source\n");
         goto end;
@@ -487,12 +495,11 @@ int Decoder::init_filters(Decoder::Filter& filter,
         goto end;
 
 end:
-    if (par) {
-        av_buffer_unref(&par->hw_frames_ctx);
-        av_freep(&par);
-    }
+    if (par) av_buffer_unref(&par->hw_frames_ctx);
+    av_freep(&par);
     avfilter_inout_free(&inputs);
     avfilter_inout_free(&outputs);
+    av_dict_free(&par_str);
 
     return ret;
 }
