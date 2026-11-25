@@ -64,8 +64,8 @@ std::jthread Decoder::launch() {
         UniqueAVPacket packet(av_packet_alloc());
         while ((video || audio) && !should_stop.stop_requested()) {
             if (av_read_frame(ictx, packet.get()) >= 0) {
-                if (!video_thrd.joinable()) video_thrd = launch_video_decoder(state);
-                if (!audio_thrd.joinable()) audio_thrd = launch_audio_decoder(state);
+                if (video && !video_thrd.joinable()) video_thrd = launch_video_decoder(state);
+                if (audio && !audio_thrd.joinable()) audio_thrd = launch_audio_decoder(state);
 
                 if (false) std::unreachable();
                 else if (video && packet->stream_index == video->stream_index) state.send_video_packet(std::move(packet));
