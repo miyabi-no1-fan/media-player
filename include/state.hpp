@@ -28,7 +28,6 @@
 #include <thread>
 #include <utility>
 
-#include "decoder.hpp"
 #include "mpmc.hpp"
 
 // audio thread is in `audio.cpp`
@@ -54,6 +53,8 @@ class AudioState;
 class DecoderState;
 class SubDecoderVideoState;
 class SubDecoderAudioState;
+
+#include "decoder.hpp"
 
 class State {
    private:
@@ -274,14 +275,16 @@ class DecoderState {
     }
     int sub_decode_video_status() { return state->sub_decode_video_status.load(); }
     int sub_decode_audio_status() { return state->sub_decode_audio_status.load(); }
+
+    friend SubDecoderVideoState;
+    friend SubDecoderAudioState;
 };
 
 class SubDecoderVideoState {
     std::shared_ptr<State> state;
 
    public:
-    SubDecoderVideoState() = default;
-    void init() { state = global_state.load(); }
+    SubDecoderVideoState(const DecoderState& s) : state(std::move(s.state)) {}
     ~SubDecoderVideoState() {
         if (state) {
             state->video_packet_queue.close();
@@ -305,8 +308,7 @@ class SubDecoderAudioState {
     std::shared_ptr<State> state;
 
    public:
-    SubDecoderAudioState() = default;
-    void init() { state = global_state.load(); }
+    SubDecoderAudioState(const DecoderState& s) : state(std::move(s.state)) {}
     ~SubDecoderAudioState() {
         if (state) {
             state->audio_packet_queue.close();

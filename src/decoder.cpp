@@ -60,12 +60,13 @@ std::jthread Decoder::launch() {
         filter = std::make_shared<Filter>();
 
         std::jthread video_thrd, audio_thrd;
-        video_thrd = launch_video_decoder();
-        audio_thrd = launch_audio_decoder();
 
         UniqueAVPacket packet(av_packet_alloc());
         while ((video || audio) && !should_stop.stop_requested()) {
             if (av_read_frame(ictx, packet.get()) >= 0) {
+                if (!video_thrd.joinable()) video_thrd = launch_video_decoder(state);
+                if (!audio_thrd.joinable()) audio_thrd = launch_audio_decoder(state);
+
                 if (false) std::unreachable();
                 else if (video && packet->stream_index == video->stream_index) state.send_video_packet(std::move(packet));
                 else if (audio && packet->stream_index == audio->stream_index) state.send_audio_packet(std::move(packet));
@@ -79,7 +80,7 @@ std::jthread Decoder::launch() {
             }
 
             while ((video || audio) && !should_stop.stop_requested() && state.waiting_for_packet_queue()) {
-                if (state.is_seek()) {
+                while (state.is_seek()) {
                     state.handle_seek();
 
                     std::int64_t ts = state.current_us() + start_time_us();
@@ -87,26 +88,18 @@ std::jthread Decoder::launch() {
 
                     if (video_thrd.joinable()) {
                         video_thrd.request_stop();
-                        video_thrd.detach();
+                        video_thrd.join();
                     }
                     if (audio_thrd.joinable()) {
                         audio_thrd.request_stop();
-                        audio_thrd.detach();
+                        audio_thrd.join();
                     }
 
-                    if (video)
-                        if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO))
-                            video = std::make_shared<VideoStream>(std::move(*strm));
-                    if (audio)
-                        if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO))
-                            audio = std::make_shared<AudioStream>(std::move(*strm));
+                    if (video) avcodec_flush_buffers(video->decoder);
+                    if (audio) avcodec_flush_buffers(audio->decoder);
 
+                    if (audio && audio->swr) audio->create_swr();
                     if (video) filter = std::make_shared<Filter>();
-
-                    video_thrd = launch_video_decoder();
-                    audio_thrd = launch_audio_decoder();
-
-                    break;
                 }
 
                 if (state.sub_decode_video_status() < 0) video = nullptr;
@@ -126,13 +119,13 @@ std::jthread Decoder::launch() {
         }                                                       \
     } while (0)
 
-std::jthread Decoder::launch_video_decoder() const {
+std::jthread Decoder::launch_video_decoder(const DecoderState& s) const {
+    if (!video) return {};
+
     // capture by copy the current state of the decoder
     return std::jthread([video = video, filter = filter, filter_descr = filter_descr, start_time_us = start_time_us(),
-                         time_base = video ? ictx->streams[video->stream_index]->time_base : AVRational()](std::stop_token should_stop) {
-        SubDecoderVideoState state;
-        state.init();
-        if (!video) return;
+                         time_base = ictx->streams[video->stream_index]->time_base, &s](std::stop_token should_stop) {
+        SubDecoderVideoState state(s);
 
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {
@@ -199,13 +192,13 @@ std::jthread Decoder::launch_video_decoder() const {
         }                                                       \
     } while (0)
 
-std::jthread Decoder::launch_audio_decoder() const {
+std::jthread Decoder::launch_audio_decoder(const DecoderState& s) const {
+    if (!audio) return {};
+
     // capture by copy the current state of the decoder
     return std::jthread([audio = audio, start_time_us = start_time_us(),
-                         time_base = audio ? ictx->streams[audio->stream_index]->time_base : AVRational()](std::stop_token should_stop) {
-        SubDecoderAudioState state;
-        state.init();
-        if (!audio) return;
+                         time_base = ictx->streams[audio->stream_index]->time_base, &s](std::stop_token should_stop) {
+        SubDecoderAudioState state(s);
 
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {

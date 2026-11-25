@@ -63,6 +63,12 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         if (!res) {
             switch (res.error()) {
                 case std::cv_status::no_timeout: {
+                    if (self.state.is_seek()) {
+                        self.state.handle_seek();
+                        self.queue<T>().clear();
+                        return 0;
+                    }
+
                     return_code = 1;  // closeStream
                     break;
                 }

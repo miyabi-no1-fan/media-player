@@ -65,6 +65,8 @@ struct AVFrameDeleter {
 using UniqueAVFrame = std::unique_ptr<AVFrame, AVFrameDeleter>;
 using UniqueAVPacket = std::unique_ptr<AVPacket, AVPacketDeleter>;
 
+#include "state.hpp"
+
 class Decoder {
     AVFormatContext* ictx = nullptr;
 
@@ -256,7 +258,7 @@ class Decoder {
     void discard_unused_streams(const std::set<AVMediaType> used_streams);
     std::int64_t start_time_us() const { return ictx->start_time == AV_NOPTS_VALUE ? 0 : ictx->start_time; }
     static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);
-    std::jthread launch_video_decoder() const;
-    std::jthread launch_audio_decoder() const;
+    std::jthread launch_video_decoder(const DecoderState& s) const;
+    std::jthread launch_audio_decoder(const DecoderState& s) const;
     static int resample_audio(const AudioStream& audio, UniqueAVFrame& output, const UniqueAVFrame& input);
 };
