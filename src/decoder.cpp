@@ -126,9 +126,16 @@ std::jthread Decoder::launch_video_decoder(const DecoderState& s) const {
     return std::jthread([video = video, filter = filter, filter_descr = filter_descr, start_time_us = start_time_us(),
                          time_base = ictx->streams[video->stream_index]->time_base, &s](std::stop_token should_stop) {
         SubDecoderVideoState state(s);
-
         UniqueAVFrame decoded(av_frame_alloc());
-        auto receive_franes = [&]() {
+        bool eof = false;
+
+        while (!eof) {
+            if (auto packet = state.recv(); packet) TRY(avcodec_send_packet(video->decoder, packet->get()));
+            else {
+                TRY(avcodec_send_packet(video->decoder, nullptr));
+                eof = true;
+            }
+
             while (avcodec_receive_frame(video->decoder, decoded.get()) >= 0) {
                 if (!filter->graph)
                     TRY(init_filters(*filter, *video, time_base,
@@ -156,15 +163,7 @@ std::jthread Decoder::launch_video_decoder(const DecoderState& s) const {
 
                 av_frame_unref(decoded.get());
             }
-        };
-
-        while (auto packet = state.recv()) {
-            if (avcodec_send_packet(video->decoder, packet->get()) >= 0)
-                receive_franes();
         }
-
-        TRY(avcodec_send_packet(video->decoder, nullptr));
-        receive_franes();
 
         if (filter->graph) {
             TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, nullptr, 0));
@@ -201,9 +200,16 @@ std::jthread Decoder::launch_audio_decoder(const DecoderState& s) const {
     return std::jthread([audio = audio, start_time_us = start_time_us(),
                          time_base = ictx->streams[audio->stream_index]->time_base, &s](std::stop_token should_stop) {
         SubDecoderAudioState state(s);
-
         UniqueAVFrame decoded(av_frame_alloc());
-        auto receive_franes = [&]() {
+        bool eof = false;
+
+        while (!eof) {
+            if (auto packet = state.recv(); packet) TRY(avcodec_send_packet(audio->decoder, packet->get()));
+            else {
+                TRY(avcodec_send_packet(audio->decoder, nullptr));
+                eof = true;
+            }
+
             while (avcodec_receive_frame(audio->decoder, decoded.get()) >= 0) {
                 std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us,
                                                        AV_TIME_BASE_Q, time_base);
@@ -228,15 +234,7 @@ std::jthread Decoder::launch_audio_decoder(const DecoderState& s) const {
 
                 if (should_stop.stop_requested()) return;
             }
-        };
-
-        while (auto packet = state.recv()) {
-            if (avcodec_send_packet(audio->decoder, packet->get()) >= 0)
-                receive_franes();
         }
-
-        TRY(avcodec_send_packet(audio->decoder, nullptr));
-        receive_franes();
 
         if (audio->swr) {
             while (1) {
