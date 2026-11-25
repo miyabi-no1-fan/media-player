@@ -23,7 +23,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
-#include <stdexcept>
+#include <set>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -137,7 +137,9 @@ std::jthread Decoder::launch_video_decoder() const {
         UniqueAVFrame decoded(av_frame_alloc());
         auto receive_franes = [&]() {
             while (avcodec_receive_frame(video->decoder, decoded.get()) >= 0) {
-                if (!filter->graph) init_filters(*filter, *video, time_base, filter_descr);
+                if (!filter->graph)
+                    TRY(init_filters(*filter, *video, time_base,
+                                     ((decoded->hw_frames_ctx) ? "hwdownload," : "") + filter_descr));
 
                 std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us,
                                                        AV_TIME_BASE_Q, time_base);
@@ -277,11 +279,17 @@ static AVPixelFormat _hw_pix_fmt;
 
 static AVPixelFormat get_hw_format(AVCodecContext*, const enum AVPixelFormat* pix_fmts) {
     const enum AVPixelFormat* p;
-    for (p = pix_fmts; *p != -1; p++) {
+    for (p = pix_fmts; *p != AV_PIX_FMT_NONE; p++) {
         if (*p == _hw_pix_fmt)
             return *p;
     }
-    throw std::runtime_error("Failed to get HW surface format.");
+
+    // fallback
+    for (p = pix_fmts; *p != AV_PIX_FMT_NONE; p++) {
+        if (*p == AV_PIX_FMT_YUV420P || *p == AV_PIX_FMT_NV12)
+            return *p;
+    }
+
     return AV_PIX_FMT_NONE;
 }
 
@@ -298,7 +306,6 @@ bool Decoder::init_hw_decoder(const AVCodec* codec, AVHWDeviceType type) {
     }
 
     if (av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0) < 0) {
-        hw_device_ctx = nullptr;
         return false;
     }
 
@@ -338,10 +345,10 @@ std::optional<Decoder::Stream> Decoder::new_stream(AVMediaType type) {
         if (hw_device_ctx) {
             decoder->hw_device_ctx = av_buffer_ref(hw_device_ctx);
             decoder->get_format = get_hw_format;
-        } else {
-            decoder->thread_count = 4;
-            decoder->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
         }
+
+        decoder->thread_count = 4;
+        decoder->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
     }
 
     if (avcodec_open2(decoder, codec, nullptr) < 0) {
@@ -363,8 +370,6 @@ void Decoder::discard_unused_streams(const std::set<AVMediaType> used_streams) {
 
 void Decoder::init_filter_descr(const std::string path) {
     std::vector<std::string> descrs;
-
-    if (hw_device_ctx) descrs.push_back("hwdownload");
 
     descrs.push_back("format=pix_fmts=yuv420p|nv12");
 
