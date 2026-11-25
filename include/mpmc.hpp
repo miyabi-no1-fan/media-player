@@ -33,6 +33,7 @@ class MPMCQueue {
     std::condition_variable not_full;   // signalled when space is available
     std::size_t bound = std::numeric_limits<decltype(bound)>::max();
     bool closed = false;
+    std::condition_variable close_signal;  // signalled when close()
 
    public:
     MPMCQueue() = default;
@@ -95,6 +96,13 @@ class MPMCQueue {
         }
         not_empty.notify_all();
         not_full.notify_all();
+        close_signal.notify_all();
+    }
+
+    // wait until the channels is closed
+    void wait_for_close() {
+        std::unique_lock lock(mutex);
+        close_signal.wait(lock, [&] { return closed; });
     }
 
     bool is_closed() const {

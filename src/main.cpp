@@ -110,6 +110,7 @@ int main(int argc, const char* argv[]) try {
         if (audio) audio->play();
         else threads.push_back(handle_no_audio_play());
         if (video) video->play();
+        else handle_no_window_play();
 
         for (auto&& thread : threads) {
             thread.request_stop();

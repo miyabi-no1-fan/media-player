@@ -165,7 +165,23 @@ class VideoState {
                state->video_packet_queue.empty() && state->video_packet_queue.is_closed() &&
                state->audio_packet_queue.empty() && state->audio_packet_queue.is_closed();
     }
+    void wait_until_all_queue_is_closed() {
+        state->video_frame_queue.wait_for_close();
+        state->audio_frame_queue.wait_for_close();
+        state->video_packet_queue.wait_for_close();
+        state->audio_packet_queue.wait_for_close();
+    }
 };
+
+inline void handle_no_window_play() {
+    VideoState state;
+    state.init();
+    state.close_queue();
+    state.wait_until_all_queue_is_closed();
+    while (!state.has_all_queue_ended()) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+}
 
 class AudioState {
     std::shared_ptr<State> state;
