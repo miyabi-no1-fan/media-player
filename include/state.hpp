@@ -19,7 +19,9 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -204,6 +206,9 @@ class AudioState {
         state = global_state.load();
     }
     std::optional<UniqueAVFrame> recv() { return state->audio_frame_queue.pop(); }
+    template <typename D>
+    std::expected<UniqueAVFrame, std::cv_status>
+    recv_deadline(D&& deadline) { return state->audio_frame_queue.pop_deadline(deadline); }
     void close_queue() { state->audio_frame_queue.close(); }
 };
 

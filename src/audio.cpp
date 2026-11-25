@@ -22,6 +22,8 @@ extern "C" {
 #include <libavutil/avutil.h>
 }
 #include <cassert>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -40,21 +42,41 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     Audio& self = *static_cast<Audio*>(user_data);
     T* buffer = static_cast<T*>(output_buffer);
 
+    int return_code = 0;
+    auto start = std::chrono::steady_clock::now();
+
     const std::size_t needed = static_cast<std::size_t>(nbuffer_frames) *
                                static_cast<std::size_t>(self.channels);
     const std::int64_t sample_time_us = (static_cast<std::int64_t>(nbuffer_frames) * AV_TIME_BASE) /
                                         static_cast<std::int64_t>(self.sample_rate);
+
+    const auto deadline = start + std::chrono::microseconds(sample_time_us);
 
     if (self.state.is_paused()) {
         std::memset(buffer, 0, needed * sizeof(T));
         return 0;
     }
 
-    self.state.next_current_us(sample_time_us);
-
     while (self.queue<T>().size() < needed) {
-        auto res = self.state.recv();
-        if (!res) break;
+        auto res = self.state.recv_deadline(deadline);
+
+        if (!res) {
+            switch (res.error()) {
+                case std::cv_status::no_timeout: {
+                    return_code = 1;  // closeStream
+                    break;
+                }
+
+                case std::cv_status::timeout: {
+                    // each full queue match with its sample_time_us
+                    // we don't play partial filled queue
+                    // exccept for the closed queue case
+                    std::memset(buffer, 0, needed * sizeof(T));
+                    return 0;
+                }
+            }
+            break;
+        }
 
         auto& frame = res.value();
         assert(frame);
@@ -84,16 +106,18 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     }
 
     const std::size_t n = std::min(self.queue<T>().size(), needed);
-    std::memcpy(buffer, self.queue<T>().data(), n * sizeof(T));
+    if (!self.queue<T>().empty()) std::memcpy(buffer, self.queue<T>().data(), n * sizeof(T));
     if (n < needed) std::memset(buffer + n, 0, (needed - n) * sizeof(T));
     self.queue<T>().erase(self.queue<T>().begin(), self.queue<T>().begin() + n);
+
+    self.state.next_current_us(sample_time_us);
 
     if (self.state.is_seek()) {
         self.state.handle_seek();
         self.queue<T>().clear();
     }
 
-    return 0;
+    return return_code;
 }
 
 Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format)

@@ -18,6 +18,7 @@
 #pragma once
 #include <condition_variable>
 #include <cstddef>
+#include <expected>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -81,6 +82,32 @@ class MPMCQueue {
     std::optional<T> try_pop() {
         std::unique_lock lock(mutex);
         if (queue.empty()) return std::nullopt;
+        T value = std::move(queue.front());
+        queue.pop();
+        lock.unlock();
+        not_full.notify_one();
+        return value;
+    }
+
+    // return std::cv_status::no_timeout only when the queue is closed AND drained
+    template <typename D>
+    std::expected<T, std::cv_status> pop_deadline(D&& deadline) {
+        std::unique_lock lock(mutex);
+        auto status = not_empty.wait_until(lock, deadline, [&] { return closed || !queue.empty(); });
+        if (queue.empty()) return std::unexpected(static_cast<std::cv_status>(!status));
+        T value = std::move(queue.front());
+        queue.pop();
+        lock.unlock();
+        not_full.notify_one();
+        return value;
+    }
+
+    // return std::cv_status::no_timeout only when the queue is closed AND drained
+    template <typename D>
+    std::expected<T, std::cv_status> pop_timeout(D&& timeout) {
+        std::unique_lock lock(mutex);
+        auto status = not_empty.wait_for(lock, timeout, [&] { return closed || !queue.empty(); });
+        if (queue.empty()) return std::unexpected(static_cast<std::cv_status>(!status));
         T value = std::move(queue.front());
         queue.pop();
         lock.unlock();
