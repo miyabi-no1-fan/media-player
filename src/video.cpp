@@ -26,6 +26,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <utility>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 extern "C" {
@@ -33,6 +34,7 @@ extern "C" {
 #include <libavutil/mathematics.h>
 }
 
+#include "decoder.hpp"
 #include "matrix.hpp"
 #include "state.hpp"
 #include "textures.hpp"
@@ -148,17 +150,23 @@ bool Video::render() {
     if (!state.is_paused() && has_video) {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(frame_time_us);
         while (1) {
-            auto res = state.recv_deadline(deadline);
+            UniqueAVFrame frame;
 
-            if (!res) {
-                switch (res.error()) {
-                    case std::cv_status::no_timeout: return false;  // eof
-                    case std::cv_status::timeout: break;            // timeout
+            if (pending_frame) {
+                frame = std::move(pending_frame);
+            } else {
+                auto res = state.recv_deadline(deadline);
+
+                if (!res) {
+                    switch (res.error()) {
+                        case std::cv_status::no_timeout: return false;  // eof
+                        case std::cv_status::timeout: break;            // timeout
+                    }
+                    break;
                 }
-                break;
-            }
 
-            auto& frame = res.value();
+                frame = std::move(res.value());
+            }
 
             std::int64_t pts = av_rescale_q(frame->pts, frame->time_base, AV_TIME_BASE_Q);
 
@@ -170,20 +178,15 @@ bool Video::render() {
                 continue;
             } else if (pts > target + frame_time_us) {
                 // overrun
-                if (state.is_seeking()) state.seeking_release();
-                while (pts > target + frame_time_us) {
-                    state.wait_for_clock();
-                    target = state.current_us();
-                }
-                decoded = std::move(frame);
-                break;
+                pending_frame = std::move(frame);
             } else {
-                if (state.is_seeking()) state.seeking_release();
                 decoded = std::move(frame);
-                // play, in case got paused previously because of underrun
-                state.play();
-                break;
             }
+
+            // play, in case got paused previously because of underrun
+            state.play();
+            if (state.is_seeking()) state.seeking_release();
+            break;
         }
     }
 

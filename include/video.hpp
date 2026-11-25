@@ -24,6 +24,7 @@ extern "C" {
 #include <libavutil/avutil.h>
 }
 
+#include "decoder.hpp"
 #include "matrix.hpp"
 #include "renderer.hpp"
 #include "state.hpp"
@@ -44,6 +45,7 @@ class Video {
     bool should_hide_progress_bar = false;
     float prev_progress = 0.f;
     bool has_video = false;
+    UniqueAVFrame pending_frame;
 
     aglea::Window window;
     aglea::Renderer renderer;
