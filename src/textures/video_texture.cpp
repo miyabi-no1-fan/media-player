@@ -18,6 +18,7 @@
 #include "textures/video_texture.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -60,6 +61,7 @@ void VideoTexture::init() {
 }
 
 void VideoTexture::create_ubo() {
+    ubo.clear();
     ubo.resize(renderer.swap_chain->image_count());
     for (auto&& v : ubo) {
         v = std::make_unique<Buffer>(
@@ -86,6 +88,8 @@ std::size_t VideoTexture::get_height(std::size_t plane) {
 }
 
 void VideoTexture::create_image_resources() {
+    image_planes.clear();
+    staging_buffers.clear();
     image_planes.resize(renderer.swap_chain->image_count());
     staging_buffers.resize(renderer.swap_chain->image_count());
     renderer.ctx.single_time_commands([this](const vk::UniqueCommandBuffer& cmd) {
@@ -142,6 +146,7 @@ void VideoTexture::create_descriptors() {
             .add_binding(3, vk::DescriptorType::eCombinedImageSampler, vk::ShaderStageFlagBits::eFragment, &*image_sampler)
             .build();
 
+    descriptor_sets.clear();
     descriptor_sets.resize(renderer.swap_chain->image_count());
     for (std::size_t i = 0; i < renderer.swap_chain->image_count(); i++) {
         descriptor_sets[i] =
@@ -273,14 +278,24 @@ void VideoTexture::update_ubo(const mat2x2& A, std::size_t i) {
 
 void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
     if (frame == nullptr) return;
+    if (static_cast<std::uint32_t>(frame->width) != width ||
+        static_cast<std::uint32_t>(frame->height) != height) {
+        width = frame->width;
+        height = frame->height;
+        // if this happen often, consider use invalidate flags
+        // like the Renderer::command_buffers implementation
+        renderer.ctx.device->waitIdle();
+        init();
+        renderer.invalidate_command_buffers();
+    }
     if (frame->format == AV_PIX_FMT_YUV420P) {
         for (std::size_t p = 0; p < VideoTexture::NPLANES; p++) {
             std::uint8_t* dst = static_cast<std::uint8_t*>(staging_buffers[i][p]->get_mapped_memory());
             std::size_t dst_stride = get_width(p);
             std::uint8_t* src = frame->data[p];
             std::size_t src_stride = static_cast<std::size_t>(frame->linesize[p]);
-            std::size_t h = std::min(get_height(p), static_cast<std::size_t>(p == 0 ? frame->height : div_ceil(frame->height, 2)));
-            std::size_t w = std::min(get_width(p), static_cast<std::size_t>(p == 0 ? frame->width : div_ceil(frame->width, 2)));
+            std::size_t h = get_height(p);
+            std::size_t w = get_width(p);
             for (std::size_t i = 0; i < h; i++)
                 std::memcpy(dst + i * dst_stride, src + i * src_stride, w);
         }
@@ -290,8 +305,8 @@ void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
             std::size_t dst_stride = get_width(0);
             std::uint8_t* src = frame->data[0];
             std::size_t src_stride = static_cast<std::size_t>(frame->linesize[0]);
-            std::size_t h = std::min(get_height(0), static_cast<std::size_t>(frame->height));
-            std::size_t w = std::min(get_width(0), static_cast<std::size_t>(frame->width));
+            std::size_t h = get_height(0);
+            std::size_t w = get_width(0);
             for (std::size_t i = 0; i < h; i++)
                 std::memcpy(dst + i * dst_stride, src + i * src_stride, w);
         }
@@ -302,8 +317,10 @@ void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
             std::size_t V_stride = get_width(2);
             std::uint8_t* src = frame->data[1];
             std::size_t src_stride = static_cast<std::size_t>(frame->linesize[1]);
-            std::size_t h = std::min(std::min(get_height(1), get_height(2)), static_cast<std::size_t>(div_ceil(frame->height, 2)));
-            std::size_t w = std::min(std::min(get_width(1), get_width(2)), static_cast<std::size_t>(div_ceil(frame->width, 2)));
+            assert(get_height(1) == get_height(2));
+            assert(get_width(1) == get_width(2));
+            std::size_t h = get_height(1);
+            std::size_t w = get_width(1);
             for (std::size_t i = 0; i < h; i++) {
                 for (std::size_t j = 0; j < w; j++) {
                     U[i * U_stride + j] = src[i * src_stride + j * 2 + 0];
