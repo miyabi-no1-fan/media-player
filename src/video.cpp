@@ -242,7 +242,7 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
 
 Video::Video(std::int64_t duration_us, const std::string& name)
     : duration_us(duration_us),
-      window(1, 1, name, 1.0 / 60),
+      window(width, height, name, 1.0 / 60),
       renderer(window) {
     tx_progress = std::make_unique<aglea::ProgressBar>(renderer);
     tx_progress->init();
