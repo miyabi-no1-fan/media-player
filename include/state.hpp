@@ -60,12 +60,7 @@ class State {
    private:
     std::atomic_int64_t current_us = 0;
     std::atomic_bool paused = false;
-
-    // signal decoder to handle seek req
-    std::atomic_bool decoder_seek_req = false;
-
-    // signal audio to handle seek req
-    std::atomic_bool audio_seek_req = false;
+    std::atomic_bool seek_req = false;
 
     // after a seek req, video decode usually slower than audio
     // which results in audio play then video just freeze
@@ -144,11 +139,10 @@ class VideoState {
         state->audio_should_wait.store(true);
         global_state.store(state);
 
-        old_state->decoder_seek_req.store(true);
+        old_state->seek_req.store(true);
+
         old_state->packet_queue_waker.store(true);
         old_state->packet_queue_waker.notify_one();
-
-        old_state->audio_seek_req.store(true);
 
         old_state->paused.store(false);
         old_state->audio_should_wait.store(false);
@@ -204,7 +198,7 @@ class AudioState {
         state->current_us.fetch_add(step);
         state->current_us.notify_all();
     }
-    bool is_seek() const { return state->audio_seek_req.load(); }
+    bool is_seek() const { return state->seek_req.load(); }
     void handle_seek() {
         assert(is_seek());
         state = global_state.load();
@@ -266,7 +260,7 @@ class DecoderState {
         return true;
     }
     std::int64_t current_us() { return state->current_us.load(); }
-    bool is_seek() const { return state->decoder_seek_req.load(); }
+    bool is_seek() const { return state->seek_req.load(); }
     // return the target_us
     void handle_seek() {
         assert(is_seek());
