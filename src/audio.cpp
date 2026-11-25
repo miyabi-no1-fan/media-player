@@ -131,7 +131,7 @@ Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat samp
 }
 
 Audio::~Audio() {
-    if (dac.isStreamRunning()) dac.abortStream();
+    if (dac.isStreamRunning()) dac.stopStream();
     if (dac.isStreamOpen()) dac.closeStream();
 }
 
