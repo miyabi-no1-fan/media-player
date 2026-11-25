@@ -173,7 +173,7 @@ bool Video::render() {
             }
         }
 
-        // play in case got paused previously
+        // play in case got paused previously because of underrun
         state.play();
     }
 
