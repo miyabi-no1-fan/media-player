@@ -68,7 +68,9 @@ void VideoTexture::create_ubo() {
             renderer.ctx,
             sizeof(UBO), 1,
             vk::BufferUsageFlagBits::eUniformBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+            vk::MemoryPropertyFlagBits::eHostVisible |
+                vk::MemoryPropertyFlagBits::eHostCoherent |
+                vk::MemoryPropertyFlagBits::eHostCached);
         v->map();
         auto* m = static_cast<UBO*>(v->get_mapped_memory());
         m->transformation = mat2x2::zeros();
@@ -185,6 +187,7 @@ void VideoTexture::create_pipeline() {
 void VideoTexture::update(AVFrame* frame, const mat2x2& transform, std::uint32_t i) {
     update_ubo(transform, i);
     update_image(frame, i);
+    previous_i = i;
 }
 
 void VideoTexture::pre(const vk::UniqueCommandBuffer& cmd, std::uint32_t i) {
@@ -277,7 +280,16 @@ void VideoTexture::update_ubo(const mat2x2& A, std::size_t i) {
 }
 
 void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
-    if (frame == nullptr) return;
+    if (!frame) {
+        if (!previous_i || previous_i == i) return;
+        for (std::size_t p = 0; p < VideoTexture::NPLANES; p++) {
+            std::memcpy(staging_buffers[i][p]->get_mapped_memory(),
+                        staging_buffers[previous_i.value()][p]->get_mapped_memory(),
+                        staging_buffers[i][p]->get_buffer_size());
+        }
+        return;
+    }
+
     if (static_cast<std::uint32_t>(frame->width) != width ||
         static_cast<std::uint32_t>(frame->height) != height) {
         width = frame->width;
@@ -288,6 +300,7 @@ void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
         init();
         renderer.invalidate_command_buffers();
     }
+
     if (frame->format == AV_PIX_FMT_YUV420P) {
         for (std::size_t p = 0; p < VideoTexture::NPLANES; p++) {
             std::uint8_t* dst = static_cast<std::uint8_t*>(staging_buffers[i][p]->get_mapped_memory());
@@ -331,6 +344,7 @@ void VideoTexture::update_image(AVFrame* frame, std::uint32_t i) {
     } else {
         throw std::runtime_error("Unknown pixel format.");
     }
+
     auto* v = static_cast<UBO*>(ubo[i]->get_mapped_memory());
     v->is_color_range_jpeg = frame->color_range == AVCOL_RANGE_JPEG;
     v->is_color_space_bt709 = frame->colorspace == AVCOL_SPC_BT709;

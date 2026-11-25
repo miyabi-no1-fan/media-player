@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <vulkan/vulkan.hpp>
 extern "C" {
@@ -59,6 +60,8 @@ class VideoTexture : public Texture {
     static constexpr std::size_t NPLANES = 3;
     std::vector<std::array<std::unique_ptr<Buffer>, NPLANES>> staging_buffers;
     std::vector<std::array<std::unique_ptr<Image>, NPLANES>> image_planes;
+
+    std::optional<std::uint32_t> previous_i = std::nullopt;
 
    public:
     VideoTexture(Renderer& renderer,
