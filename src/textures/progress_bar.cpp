@@ -46,6 +46,7 @@ void ProgressBar::init() {
 }
 
 void ProgressBar::create_ubo() {
+    ubo.clear();
     ubo.resize(renderer.swap_chain->image_count());
     for (auto&& v : ubo) {
         v = std::make_unique<Buffer>(
@@ -66,6 +67,7 @@ void ProgressBar::create_descriptors() {
             .add_binding(0, vk::DescriptorType::eUniformBuffer, vk::ShaderStageFlagBits::eFragment)
             .build();
 
+    descriptor_sets.clear();
     descriptor_sets.resize(renderer.swap_chain->image_count());
     for (std::size_t i = 0; i < renderer.swap_chain->image_count(); i++) {
         descriptor_sets[i] =
