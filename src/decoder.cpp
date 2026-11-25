@@ -166,17 +166,19 @@ std::jthread Decoder::launch_video_decoder(const DecoderState& s) const {
         TRY(avcodec_send_packet(video->decoder, nullptr));
         receive_franes();
 
-        TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, nullptr, 0));
-        while (1) {
-            UniqueAVFrame filtered(av_frame_alloc());
-            int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.get());
-            if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
-            TRY(res);
-            filtered->time_base = time_base;
-            filtered->pts = filtered->best_effort_timestamp;
-            filtered->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
-            if (state.send(std::move(filtered)) != std::nullopt) return;
-            if (should_stop.stop_requested()) return;
+        if (filter->graph) {
+            TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, nullptr, 0));
+            while (1) {
+                UniqueAVFrame filtered(av_frame_alloc());
+                int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.get());
+                if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
+                TRY(res);
+                filtered->time_base = time_base;
+                filtered->pts = filtered->best_effort_timestamp;
+                filtered->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
+                if (state.send(std::move(filtered)) != std::nullopt) return;
+                if (should_stop.stop_requested()) return;
+            }
         }
     });
 }
