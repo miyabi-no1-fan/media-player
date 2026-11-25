@@ -25,6 +25,9 @@ class Texture {
    public:
     Texture() {}
     virtual ~Texture() = default;
+
+    // only call when device is idle
+    // must Renderer::invalidate_command_buffers() after init()
     virtual void init() = 0;
 
     // before begin renderpass
