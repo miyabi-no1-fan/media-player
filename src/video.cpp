@@ -18,6 +18,8 @@
 #include "video.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -47,7 +49,7 @@ void Video::play() {
     bool click_left_locked = false;
 
     std::int64_t key_cooldown_us = 0;
-    constexpr std::int64_t COOLDOWN = AV_TIME_BASE / 10;  // 0.1s
+    constexpr std::int64_t COOLDOWN = AV_TIME_BASE * 2 / 10;  // 0.2s
 
     while (render()) {
         if (window.should_close()) std::quick_exit(0);
@@ -142,11 +144,19 @@ void Video::seek(std::int64_t target_us) {
 bool Video::render() {
     window.poll_events();
 
-    UniqueAVFrame decoded = {};
+    UniqueAVFrame decoded = nullptr;
     if (!state.is_paused() && has_video) {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::microseconds(frame_time_us);
         while (1) {
-            auto res = state.recv();
-            if (!res) return false;
+            auto res = state.recv_deadline(deadline);
+
+            if (!res) {
+                switch (res.error()) {
+                    case std::cv_status::no_timeout: return false;  // eof
+                    case std::cv_status::timeout: break;            // timeout
+                }
+                break;
+            }
 
             auto& frame = res.value();
 
@@ -168,18 +178,17 @@ bool Video::render() {
                 decoded = std::move(frame);
                 break;
             } else {
+                if (state.is_seeking()) state.seeking_release();
                 decoded = std::move(frame);
+                // play, in case got paused previously because of underrun
+                state.play();
                 break;
             }
         }
-
-        // play in case got paused previously because of underrun
-        state.play();
     }
 
-    if (state.is_seeking()) state.seeking_release();
-
     if (!has_video) {
+        if (state.is_seeking()) state.seeking_release();
         // We skipped receive because of no video,
         // so we won't receive any EndOfInput signal from decoder.
         // This is the fallback

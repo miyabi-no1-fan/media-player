@@ -160,6 +160,9 @@ class VideoState {
     bool is_seeking() { return state->audio_should_wait.load(); }
     void seeking_release() { state->audio_should_wait.store(false); }
     std::optional<UniqueAVFrame> recv() { return state->video_frame_queue.pop(); }
+    template <typename D>
+    std::expected<UniqueAVFrame, std::cv_status>
+    recv_deadline(D&& deadline) { return state->video_frame_queue.pop_deadline(deadline); }
     void close_queue() { state->video_frame_queue.close(); }
     bool has_all_queue_ended() {
         return state->video_frame_queue.empty() && state->video_frame_queue.is_closed() &&
