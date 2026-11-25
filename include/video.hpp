@@ -33,8 +33,8 @@ extern "C" {
 #include "window.hpp"
 
 class Video {
-    std::size_t width = 1;
-    std::size_t height = 1;
+    std::size_t width = 1280;
+    std::size_t height = 720;
     std::size_t bpp = 3;
     std::int64_t frame_time_us = static_cast<std::int64_t>(AV_TIME_BASE / 60.f);
     std::int64_t duration_us;

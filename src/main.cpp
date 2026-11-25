@@ -16,7 +16,6 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 #include <cmath>
-#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -94,9 +93,8 @@ int main(int argc, const char* argv[]) try {
         if (!info.no_window && video == nullptr) {
             if (decoder.has_video()) {
                 video = std::make_unique<Video>(
-                    static_cast<std::uint32_t>(*decoder.width()),
-                    static_cast<std::uint32_t>(*decoder.height()),
-                    std::round(*decoder.fps()),
+                    1280, 720,  // window's initial width and height doesn't matter, it's resizable
+                    *decoder.fps(),
                     decoder.duration_us(),
                     "media-player: " + info.path,
                     info.transformation);

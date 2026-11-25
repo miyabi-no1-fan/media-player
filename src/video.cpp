@@ -23,7 +23,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -228,9 +227,6 @@ Video::Video(std::uint32_t width, std::uint32_t height, double fps, std::int64_t
       transformation(transformation),
       window(width, height, name, 1.0 / fps),
       renderer(window) {
-    #ifndef NDEBUG
-    std::cout << "Video display: " << width << "x" << height << "@" << fps << std::endl;
-    #endif
     has_video = true;
     tx_video = std::make_unique<aglea::VideoTexture>(renderer, width, height);
     tx_progress = std::make_unique<aglea::ProgressBar>(renderer);
