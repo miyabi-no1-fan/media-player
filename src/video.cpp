@@ -140,6 +140,9 @@ void Video::pause() {
 
 void Video::seek(std::int64_t target_us) {
     state.seeking_lock(target_us);
+
+    // seek will re-open the queue, so we need to close it again
+    if (!has_video) state.close_queue();
 }
 
 bool Video::render() {
