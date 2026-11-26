@@ -65,8 +65,6 @@ struct AVFrameDeleter {
 using UniqueAVFrame = std::unique_ptr<AVFrame, AVFrameDeleter>;
 using UniqueAVPacket = std::unique_ptr<AVPacket, AVPacketDeleter>;
 
-#include "state.hpp"
-
 class Decoder {
     AVFormatContext* ictx = nullptr;
 
@@ -80,11 +78,7 @@ class Decoder {
         AVFilterContext* buffersrc_ctx = nullptr;
         AVFilterContext* buffersink_ctx = nullptr;
         Filter() {}
-        ~Filter() {
-            avfilter_graph_free(&graph);
-            buffersrc_ctx = nullptr;
-            buffersink_ctx = nullptr;
-        }
+        ~Filter() { clear(); }
         Filter(const Filter&) = delete;
         Filter& operator=(const Filter&) = delete;
         Filter(Filter&& o) noexcept
@@ -99,6 +93,11 @@ class Decoder {
                 buffersink_ctx = std::exchange(o.buffersink_ctx, nullptr);
             }
             return *this;
+        }
+        void clear() {
+            avfilter_graph_free(&graph);
+            buffersrc_ctx = nullptr;
+            buffersink_ctx = nullptr;
         }
     };
 
@@ -144,10 +143,9 @@ class Decoder {
         ~AudioStream() { swr_free(&swr); }
     };
 
-    std::shared_ptr<Filter> filter = nullptr;
-
-    std::shared_ptr<VideoStream> video = nullptr;
-    std::shared_ptr<AudioStream> audio = nullptr;
+    Filter filter;
+    std::optional<VideoStream> video = std::nullopt;
+    std::optional<AudioStream> audio = std::nullopt;
 
    public:
     Decoder(const char* path, bool disable_hwdec) {
@@ -163,15 +161,15 @@ class Decoder {
             throw std::runtime_error("Cannot read input file: " + std::string(path));
         }
 
-        if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video = std::make_shared<VideoStream>(std::move(*strm));
-        if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio = std::make_shared<AudioStream>(std::move(*strm));
+        if (auto strm = new_stream(AVMEDIA_TYPE_VIDEO)) video.emplace(std::move(*strm));
+        if (auto strm = new_stream(AVMEDIA_TYPE_AUDIO)) audio.emplace(std::move(*strm));
         discard_unused_streams({ AVMEDIA_TYPE_VIDEO, AVMEDIA_TYPE_AUDIO });
 
         init_filter_descr(path);
     }
 
-    void no_video() { video = nullptr; }
-    void no_audio() { audio = nullptr; }
+    void no_video() { video = std::nullopt; }
+    void no_audio() { audio = std::nullopt; }
 
     std::jthread launch();
 
@@ -180,8 +178,8 @@ class Decoder {
         av_buffer_unref(&hw_device_ctx);
     }
 
-    bool has_video() const { return video != nullptr; }
-    bool has_audio() const { return audio != nullptr; }
+    bool has_video() const { return video.has_value(); }
+    bool has_audio() const { return audio.has_value(); }
 
     // for video
     std::optional<int> width() const {
@@ -191,11 +189,11 @@ class Decoder {
 
     std::optional<int> height() const {
         if (!video) return std::nullopt;
-        return video->decoder->height;
+        return video.value().decoder->height;
     }
 
     std::optional<double> fps() const {
-        if (video) return av_q2d(ictx->streams[video->stream_index]->avg_frame_rate);
+        if (video) return av_q2d(ictx->streams[video.value().stream_index]->avg_frame_rate);
         return std::nullopt;
     }
 
@@ -205,50 +203,50 @@ class Decoder {
 
     // for audio
     std::optional<int> input_audio_channels() const {
-        if (audio) return audio->decoder->ch_layout.nb_channels;
+        if (audio) return audio.value().decoder->ch_layout.nb_channels;
         return std::nullopt;
     }
 
     std::optional<int> input_sample_rate() const {
-        if (audio) return audio->decoder->sample_rate;
+        if (audio) return audio.value().decoder->sample_rate;
         return std::nullopt;
     }
 
     std::optional<AVSampleFormat> input_sample_format() const {
-        if (audio) return audio->decoder->sample_fmt;
+        if (audio) return audio.value().decoder->sample_fmt;
         return std::nullopt;
     }
 
     std::optional<int> output_audio_channels() const {
         if (!audio) return std::nullopt;
-        if (audio->swr) {
+        if (audio.value().swr) {
             AVChannelLayout channel_layout;
-            av_opt_get_chlayout(audio->swr, "out_chlayout", 0, &channel_layout);
+            av_opt_get_chlayout(audio.value().swr, "out_chlayout", 0, &channel_layout);
             int channels = channel_layout.nb_channels;
             av_channel_layout_uninit(&channel_layout);
             return channels;
         }
-        return audio->decoder->ch_layout.nb_channels;
+        return audio.value().decoder->ch_layout.nb_channels;
     }
 
     std::optional<int> output_sample_rate() const {
         if (!audio) return std::nullopt;
-        if (audio->swr) {
+        if (audio.value().swr) {
             int64_t sample_rate;
-            av_opt_get_int(audio->swr, "out_sample_rate", 0, &sample_rate);
+            av_opt_get_int(audio.value().swr, "out_sample_rate", 0, &sample_rate);
             return static_cast<int>(sample_rate);
         }
-        return audio->decoder->sample_rate;
+        return audio.value().decoder->sample_rate;
     }
 
     std::optional<AVSampleFormat> output_sample_format() const {
         if (!audio) return std::nullopt;
-        if (audio->swr) {
+        if (audio.value().swr) {
             AVSampleFormat fmt;
-            av_opt_get_sample_fmt(audio->swr, "out_sample_fmt", 0, &fmt);
+            av_opt_get_sample_fmt(audio.value().swr, "out_sample_fmt", 0, &fmt);
             return fmt;
         }
-        return audio->decoder->sample_fmt;
+        return audio.value().decoder->sample_fmt;
     }
 
    private:
@@ -258,7 +256,7 @@ class Decoder {
     void discard_unused_streams(const std::set<AVMediaType> used_streams);
     std::int64_t start_time_us() const { return ictx->start_time == AV_NOPTS_VALUE ? 0 : ictx->start_time; }
     static int init_filters(Filter& filter, const Decoder::VideoStream& video, AVRational time_base, const std::string& filter_descr);
-    std::jthread launch_video_decoder(const DecoderState& s) const;
-    std::jthread launch_audio_decoder(const DecoderState& s) const;
+    std::jthread launch_video_decoder();
+    std::jthread launch_audio_decoder();
     static int resample_audio(const AudioStream& audio, UniqueAVFrame& output, const UniqueAVFrame& input);
 };

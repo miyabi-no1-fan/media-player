@@ -53,20 +53,17 @@ extern "C" {
 #include "state.hpp"
 
 std::jthread Decoder::launch() {
-    return std::jthread([this](std::stop_token should_stop) mutable {
+    return std::jthread([this](std::stop_token should_stop) {
         DecoderState state;
         state.init();
 
-        filter = std::make_shared<Filter>();
-
         std::jthread video_thrd, audio_thrd;
+        if (video) video_thrd = launch_video_decoder();
+        if (audio) audio_thrd = launch_audio_decoder();
 
         UniqueAVPacket packet(av_packet_alloc());
         while ((video || audio) && !should_stop.stop_requested()) {
             if (av_read_frame(ictx, packet.get()) >= 0) {
-                if (video && !video_thrd.joinable()) video_thrd = launch_video_decoder(state);
-                if (audio && !audio_thrd.joinable()) audio_thrd = launch_audio_decoder(state);
-
                 if (false) std::unreachable();
                 else if (video && packet->stream_index == video->stream_index) state.send_video_packet(std::move(packet));
                 else if (audio && packet->stream_index == audio->stream_index) state.send_audio_packet(std::move(packet));
@@ -82,28 +79,12 @@ std::jthread Decoder::launch() {
             while ((video || audio) && !should_stop.stop_requested() && state.waiting_for_packet_queue()) {
                 while (state.is_seek()) {
                     state.handle_seek();
-
                     std::int64_t ts = state.current_us() + start_time_us();
                     avformat_seek_file(ictx, -1, INT64_MIN, ts, ts, 0);
-
-                    if (video_thrd.joinable()) {
-                        video_thrd.request_stop();
-                        video_thrd.join();
-                    }
-                    if (audio_thrd.joinable()) {
-                        audio_thrd.request_stop();
-                        audio_thrd.join();
-                    }
-
-                    if (video) avcodec_flush_buffers(video->decoder);
-                    if (audio) avcodec_flush_buffers(audio->decoder);
-
-                    if (audio && audio->swr) audio->create_swr();
-                    if (video) filter = std::make_shared<Filter>();
                 }
 
-                if (state.sub_decode_video_status() < 0) video = nullptr;
-                if (state.sub_decode_audio_status() < 0) audio = nullptr;
+                if (state.sub_decode_video_status() < 0) video = std::nullopt;
+                if (state.sub_decode_audio_status() < 0) audio = std::nullopt;
             }
         }
     });
@@ -119,64 +100,93 @@ std::jthread Decoder::launch() {
         }                                                       \
     } while (0)
 
-std::jthread Decoder::launch_video_decoder(const DecoderState& s) const {
+std::jthread Decoder::launch_video_decoder() {
     if (!video) return {};
 
-    // capture by copy the current state of the decoder
-    return std::jthread([video = video, filter = filter, filter_descr = filter_descr, start_time_us = start_time_us(),
-                         time_base = ictx->streams[video->stream_index]->time_base, &s](std::stop_token should_stop) {
-        SubDecoderVideoState state(s);
+    return std::jthread([this](std::stop_token should_stop) {
+        const AVRational time_base = ictx->streams[video->stream_index]->time_base;
+
+        SubDecoderVideoState state;
+        state.init();
         UniqueAVFrame decoded(av_frame_alloc());
         bool eof = false;
 
-        while (!eof) {
+        while (!should_stop.stop_requested()) {
             if (auto packet = state.recv(); packet) TRY(avcodec_send_packet(video->decoder, packet->get()));
             else {
+                if (state.is_seek()) {
+                    state.handle_seek();
+                    avcodec_flush_buffers(video->decoder);
+                    filter.clear();
+                    eof = false;
+                    continue;
+                }
+                if (should_stop.stop_requested()) return;
                 TRY(avcodec_send_packet(video->decoder, nullptr));
                 eof = true;
             }
 
             while (avcodec_receive_frame(video->decoder, decoded.get()) >= 0) {
-                if (!filter->graph)
-                    TRY(init_filters(*filter, *video, time_base,
+                if (!filter.graph)
+                    TRY(init_filters(filter, video.value(), time_base,
                                      ((decoded->hw_frames_ctx) ? "hwdownload," : "") + filter_descr));
 
-                std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us,
+                std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us(),
                                                        AV_TIME_BASE_Q, time_base);
 
                 decoded->pts = decoded->best_effort_timestamp;
 
                 if (decoded->pts >= target_pts) {
-                    TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, decoded.get(), 0));
+                    TRY(av_buffersrc_add_frame_flags(filter.buffersrc_ctx, decoded.get(), 0));
                     while (1) {
                         UniqueAVFrame filtered(av_frame_alloc());
-                        int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.get());
+                        int res = av_buffersink_get_frame(filter.buffersink_ctx, filtered.get());
                         if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
                         TRY(res);
                         filtered->time_base = time_base;
-                        filtered->pts = filtered->best_effort_timestamp;
-                        filtered->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
-                        if (state.send(std::move(filtered)) != std::nullopt) return;
-                        if (should_stop.stop_requested()) return;
+                        filtered->pts -= av_rescale_q(start_time_us(), AV_TIME_BASE_Q, time_base);
+                        if (state.send(std::move(filtered)) != std::nullopt) {
+                            if (state.is_seek()) break;
+                            return;
+                        }
                     }
                 }
 
                 av_frame_unref(decoded.get());
-            }
-        }
-
-        if (filter->graph) {
-            TRY(av_buffersrc_add_frame_flags(filter->buffersrc_ctx, nullptr, 0));
-            while (1) {
-                UniqueAVFrame filtered(av_frame_alloc());
-                int res = av_buffersink_get_frame(filter->buffersink_ctx, filtered.get());
-                if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
-                TRY(res);
-                filtered->time_base = time_base;
-                filtered->pts = filtered->best_effort_timestamp;
-                filtered->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
-                if (state.send(std::move(filtered)) != std::nullopt) return;
+                if (state.is_seek()) break;
                 if (should_stop.stop_requested()) return;
+            }
+
+            if (state.is_seek()) {
+                state.handle_seek();
+                avcodec_flush_buffers(video->decoder);
+                filter.clear();
+                eof = false;
+                continue;
+            }
+
+            if (eof) {
+                if (filter.graph) {
+                    TRY(av_buffersrc_add_frame_flags(filter.buffersrc_ctx, nullptr, 0));
+                    while (1) {
+                        UniqueAVFrame filtered(av_frame_alloc());
+                        int res = av_buffersink_get_frame(filter.buffersink_ctx, filtered.get());
+                        if (res == AVERROR(EAGAIN) || res == AVERROR_EOF) break;
+                        TRY(res);
+                        filtered->time_base = time_base;
+                        filtered->pts -= av_rescale_q(start_time_us(), AV_TIME_BASE_Q, time_base);
+                        if (state.send(std::move(filtered)) != std::nullopt) {
+                            if (state.is_seek()) break;
+                            return;
+                        }
+                    }
+                }
+
+                state.close_connection();
+                while (!should_stop.stop_requested() && !state.is_seek()) {
+                    // TODO: make this blocking instead of polling
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
             }
         }
     });
@@ -193,57 +203,91 @@ std::jthread Decoder::launch_video_decoder(const DecoderState& s) const {
         }                                                       \
     } while (0)
 
-std::jthread Decoder::launch_audio_decoder(const DecoderState& s) const {
+std::jthread Decoder::launch_audio_decoder() {
     if (!audio) return {};
 
-    // capture by copy the current state of the decoder
-    return std::jthread([audio = audio, start_time_us = start_time_us(),
-                         time_base = ictx->streams[audio->stream_index]->time_base, &s](std::stop_token should_stop) {
-        SubDecoderAudioState state(s);
-        UniqueAVFrame decoded(av_frame_alloc());
+    return std::jthread([this](std::stop_token should_stop) {
+        const AVRational time_base = ictx->streams[audio->stream_index]->time_base;
+
+        SubDecoderAudioState state;
+        state.init();
+        UniqueAVFrame decoded;
         bool eof = false;
 
-        while (!eof) {
+        while (!should_stop.stop_requested()) {
             if (auto packet = state.recv(); packet) TRY(avcodec_send_packet(audio->decoder, packet->get()));
             else {
+                if (state.is_seek()) {
+                    state.handle_seek();
+                    avcodec_flush_buffers(audio->decoder);
+                    if (audio->swr) audio->create_swr();
+                    eof = false;
+                    continue;
+                }
+                if (should_stop.stop_requested()) return;
                 TRY(avcodec_send_packet(audio->decoder, nullptr));
                 eof = true;
             }
 
+            if (!decoded) decoded = UniqueAVFrame(av_frame_alloc());
             while (avcodec_receive_frame(audio->decoder, decoded.get()) >= 0) {
-                std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us,
+                std::int64_t target_pts = av_rescale_q(state.current_us() + start_time_us(),
                                                        AV_TIME_BASE_Q, time_base);
 
                 decoded->pts = decoded->best_effort_timestamp;
 
                 if (decoded->pts >= target_pts) {
+                    UniqueAVFrame out;
+                    const std::int64_t pts = decoded->pts - av_rescale_q(start_time_us(), AV_TIME_BASE_Q, time_base);
+
                     if (audio->swr) {
-                        UniqueAVFrame out(av_frame_alloc());
+                        out.reset(av_frame_alloc());
                         TRY(resample_audio(*audio, out, decoded));
-                        out->time_base = time_base;
-                        out->pts = decoded->pts;
-                        out->pts -= av_rescale_q(start_time_us, AV_TIME_BASE_Q, time_base);
-                        if (state.send(std::move(out)) != std::nullopt) return;
                     } else {
-                        if (state.send(std::move(decoded)) != std::nullopt) return;
-                        decoded = UniqueAVFrame(av_frame_alloc());
+                        out = std::move(decoded);
+                        decoded.reset(av_frame_alloc());
+                    }
+
+                    out->time_base = time_base;
+                    out->pts = pts;
+                    if (state.send(std::move(out)) != std::nullopt) {
+                        if (state.is_seek()) break;
+                        return;
                     }
                 }
 
                 av_frame_unref(decoded.get());
-
                 if (should_stop.stop_requested()) return;
             }
-        }
 
-        if (audio->swr) {
-            while (1) {
-                UniqueAVFrame out(av_frame_alloc());
-                TRY(resample_audio(*audio, out, nullptr));
-                if (out->nb_samples == 0) break;
-                out->pts = AV_NOPTS_VALUE;
-                if (state.send(std::move(out)) != std::nullopt) return;
-                if (should_stop.stop_requested()) return;
+            if (state.is_seek()) {
+                state.handle_seek();
+                avcodec_flush_buffers(audio->decoder);
+                if (audio->swr) audio->create_swr();
+                eof = false;
+                continue;
+            }
+
+            if (eof) {
+                if (audio->swr) {
+                    while (1) {
+                        UniqueAVFrame out(av_frame_alloc());
+                        TRY(resample_audio(*audio, out, nullptr));
+                        if (out->nb_samples == 0) break;
+                        out->pts = AV_NOPTS_VALUE;
+                        if (state.send(std::move(out)) != std::nullopt) {
+                            if (state.is_seek()) break;
+                            return;
+                        }
+                        if (should_stop.stop_requested()) return;
+                    }
+                }
+
+                state.close_connection();
+                while (!should_stop.stop_requested() && !state.is_seek()) {
+                    // TODO: make this blocking instead of polling
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
             }
         }
     });

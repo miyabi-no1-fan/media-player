@@ -28,6 +28,7 @@
 #include <thread>
 #include <utility>
 
+#include "decoder.hpp"
 #include "mpmc.hpp"
 
 // audio thread is in `audio.cpp`
@@ -53,8 +54,6 @@ class AudioState;
 class DecoderState;
 class SubDecoderVideoState;
 class SubDecoderAudioState;
-
-#include "decoder.hpp"
 
 class State {
    private:
@@ -264,23 +263,16 @@ class DecoderState {
     }
     int sub_decode_video_status() { return state->sub_decode_video_status.load(); }
     int sub_decode_audio_status() { return state->sub_decode_audio_status.load(); }
-
-    friend SubDecoderVideoState;
-    friend SubDecoderAudioState;
 };
 
 class SubDecoderVideoState {
     std::shared_ptr<State> state;
 
    public:
-    SubDecoderVideoState(const DecoderState& s) : state(std::move(s.state)) {}
+    SubDecoderVideoState() = default;
+    void init() { state = global_state.load(); }
     ~SubDecoderVideoState() {
-        if (state) {
-            state->video_packet_queue.close();
-            state->video_frame_queue.close();
-            state->packet_queue_waker.store(true);
-            state->packet_queue_waker.notify_one();
-        }
+        if (state) close_connection();
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->video_frame_queue.push(std::move(frame)); }
@@ -291,20 +283,28 @@ class SubDecoderVideoState {
         return res;
     }
     void error(int e) { state->sub_decode_video_status.store(e); }
+    void close_connection() {
+        state->video_packet_queue.close();
+        state->video_frame_queue.close();
+        state->packet_queue_waker.store(true);
+        state->packet_queue_waker.notify_one();
+    }
+    bool is_seek() const { return state->seek_req.load(); }
+    void handle_seek() {
+        assert(is_seek());
+        close_connection();
+        state = global_state.load();
+    }
 };
 
 class SubDecoderAudioState {
     std::shared_ptr<State> state;
 
    public:
-    SubDecoderAudioState(const DecoderState& s) : state(std::move(s.state)) {}
+    SubDecoderAudioState() = default;
+    void init() { state = global_state.load(); }
     ~SubDecoderAudioState() {
-        if (state) {
-            state->audio_packet_queue.close();
-            state->audio_frame_queue.close();
-            state->packet_queue_waker.store(true);
-            state->packet_queue_waker.notify_one();
-        }
+        if (state) close_connection();
     }
     std::int64_t current_us() { return state->current_us.load(); }
     std::optional<UniqueAVFrame> send(UniqueAVFrame frame) { return state->audio_frame_queue.push(std::move(frame)); }
@@ -315,4 +315,16 @@ class SubDecoderAudioState {
         return res;
     }
     void error(int e) { state->sub_decode_audio_status.store(e); }
+    void close_connection() {
+        state->audio_packet_queue.close();
+        state->audio_frame_queue.close();
+        state->packet_queue_waker.store(true);
+        state->packet_queue_waker.notify_one();
+    }
+    bool is_seek() const { return state->seek_req.load(); }
+    void handle_seek() {
+        assert(is_seek());
+        close_connection();
+        state = global_state.load();
+    }
 };
