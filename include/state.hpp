@@ -257,7 +257,6 @@ class DecoderState {
     }
     std::int64_t current_us() { return state->current_us.load(); }
     bool is_seek() const { return state->seek_req.load(); }
-    // return the target_us
     void handle_seek() {
         assert(is_seek());
         close_connection();
