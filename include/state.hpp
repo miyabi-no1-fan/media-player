@@ -61,16 +61,7 @@ class State {
     std::atomic_bool paused = false;
     std::atomic_bool seek_req = false;
 
-    // after a seek req, video decode usually slower than audio
-    // which results in audio play then video just freeze
-    // until video decode finally catch up.
-    // our A/V sync logic doesn't help much here.
-    // the blocking recv will wait until the first frame produce
-    // is why it's freezing,
-    // only after the very first frame received would A/V sync help
-    // -- but decoder and channels has warmed up by then
-    // so it's not necessary slow anymore.
-    // So this flag is to fix the issue.
+    // Video underrun will need audio to wait to catch up
     std::atomic_bool audio_should_wait = false;
 
     // hold an AVERROR code if < 0
@@ -127,14 +118,13 @@ class VideoState {
     void play() { state->paused.store(false); }
     bool is_seek_available() { return true; }
     // require a matching `seeking_release`
-    void seeking_lock(std::int64_t target_us) {
+    void seek(std::int64_t target_us) {
         assert(is_seek_available());
 
         auto old_state = std::move(state);
 
         state = std::make_shared<State>();
         state->current_us.store(target_us);
-        state->audio_should_wait.store(true);
         global_state.store(state);
 
         old_state->seek_req.store(true);
@@ -149,9 +139,8 @@ class VideoState {
         old_state->video_frame_queue.close();
         old_state->audio_frame_queue.close();
     }
-    // return true if you haven't call `seeking_release` after a `seeking_lock`
-    bool is_seeking() { return state->audio_should_wait.load(); }
-    void seeking_release() { state->audio_should_wait.store(false); }
+    bool is_audio_waiting() { return state->audio_should_wait.load(); }
+    void audio_should_wait(bool flag) { state->audio_should_wait.store(flag); }
     std::optional<UniqueAVFrame> recv() { return state->video_frame_queue.pop(); }
     template <typename D>
     std::expected<UniqueAVFrame, std::cv_status>

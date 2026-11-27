@@ -127,7 +127,6 @@ void Video::play() {
     }
 
     state.close_queue();
-    if (state.is_seeking()) state.seeking_release();
 }
 
 void Video::pause() {
@@ -140,7 +139,7 @@ void Video::pause() {
 }
 
 void Video::seek(std::int64_t target_us) {
-    state.seeking_lock(target_us);
+    state.seek(target_us);
 
     // seek will re-open the queue, so we need to close it again
     if (!has_video) state.close_queue();
@@ -165,6 +164,8 @@ bool Video::render() {
                         case std::cv_status::no_timeout: return false;  // eof
                         case std::cv_status::timeout: break;            // timeout
                     }
+                    // timeout
+                    state.audio_should_wait(true);
                     break;
                 }
 
@@ -177,7 +178,7 @@ bool Video::render() {
 
             if (pts < target - frame_time_us) {
                 // underrun
-                state.pause();  // pause so audio wait for us
+                state.audio_should_wait(true);
                 continue;
             } else if (pts > target + frame_time_us) {
                 // overrun
@@ -186,15 +187,13 @@ bool Video::render() {
                 decoded = std::move(frame);
             }
 
-            // play, in case got paused previously because of underrun
-            state.play();
-            if (state.is_seeking()) state.seeking_release();
+            // in case audio is waiting because of underrun
+            state.audio_should_wait(false);
             break;
         }
     }
 
     if (!has_video) {
-        if (state.is_seeking()) state.seeking_release();
         // We skipped receive because of no video,
         // so we won't receive any EndOfInput signal from decoder.
         // This is the fallback
