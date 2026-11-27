@@ -68,6 +68,7 @@ class State {
     std::atomic_int sub_decode_video_status = 0;
     std::atomic_int sub_decode_audio_status = 0;
 
+    // for audio and decoder, a failed send or recv could mean should quit or a seek_req
     MPMCQueue<UniqueAVPacket> video_packet_queue;
     MPMCQueue<UniqueAVPacket> audio_packet_queue;
     MPMCQueue<UniqueAVFrame> video_frame_queue{ VIDEO_FRAME_QUEUE_BOUND };
