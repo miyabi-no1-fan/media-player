@@ -79,7 +79,7 @@ class State {
     std::atomic_bool packet_queue_waker;
 
    public:
-    State() {}
+    State() = default;
     ~State() {
         video_packet_queue.close();
         audio_packet_queue.close();
