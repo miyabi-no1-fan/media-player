@@ -126,7 +126,7 @@ void Video::play() {
         key_cooldown_us = std::max(key_cooldown_us - frame_time_us, std::int64_t(0));
     }
 
-    state.close_queue();
+    state.quit();
 }
 
 void Video::pause() {

@@ -64,6 +64,10 @@ class State {
     // Video underrun will need audio to wait to catch up
     std::atomic_bool audio_should_wait = false;
 
+    // before quit from eof, decoder will wait on this flag to handle seek_req
+    // for decoder, decoder_should_wait = false could mean should quit or a seek_req
+    std::atomic_bool decoder_should_wait = true;
+
     // hold an AVERROR code if < 0
     std::atomic_int sub_decode_video_status = 0;
     std::atomic_int sub_decode_audio_status = 0;
@@ -122,27 +126,14 @@ class VideoState {
     void seek(std::int64_t target_us) {
         assert(is_seek_available());
 
-        auto old_state = std::move(state);
+        auto new_state = std::make_shared<State>();
+        new_state->current_us.store(target_us);
+        global_state.store(new_state);
 
-        state = std::make_shared<State>();
-        state->current_us.store(target_us);
-        global_state.store(state);
+        state->seek_req.store(true);
+        quit();
 
-        old_state->seek_req.store(true);
-
-        // close all queue
-        old_state->video_frame_queue.close();
-        old_state->audio_frame_queue.close();
-        old_state->video_packet_queue.close();
-        old_state->audio_packet_queue.close();
-
-        // wake up decoder
-        old_state->packet_queue_waker.store(true);
-        old_state->packet_queue_waker.notify_one();
-
-        // wake up audio
-        old_state->paused.store(false);
-        old_state->audio_should_wait.store(false);
+        state = new_state;
     }
     bool is_audio_waiting() { return state->audio_should_wait.load(); }
     void audio_should_wait(bool flag) { state->audio_should_wait.store(flag); }
@@ -162,6 +153,23 @@ class VideoState {
         state->audio_frame_queue.wait_for_close();
         state->video_packet_queue.wait_for_close();
         state->audio_packet_queue.wait_for_close();
+    }
+    void quit() {
+        // close all queue
+        state->video_frame_queue.close();
+        state->audio_frame_queue.close();
+        state->video_packet_queue.close();
+        state->audio_packet_queue.close();
+
+        // wake up decoder
+        state->packet_queue_waker.store(true);
+        state->packet_queue_waker.notify_one();
+        state->decoder_should_wait.store(false);
+        state->decoder_should_wait.notify_all();
+
+        // wake up audio
+        state->paused.store(false);
+        state->audio_should_wait.store(false);
     }
 };
 
@@ -256,6 +264,7 @@ class DecoderState {
     }
     int sub_decode_video_status() { return state->sub_decode_video_status.load(); }
     int sub_decode_audio_status() { return state->sub_decode_audio_status.load(); }
+    void wait_before_quit() { state->decoder_should_wait.wait(true); }
 };
 
 class SubDecoderVideoState {
@@ -287,6 +296,7 @@ class SubDecoderVideoState {
         assert(is_seek());
         state = global_state.load();
     }
+    void wait_before_quit() { state->decoder_should_wait.wait(true); }
 };
 
 class SubDecoderAudioState {
@@ -318,4 +328,5 @@ class SubDecoderAudioState {
         assert(is_seek());
         state = global_state.load();
     }
+    void wait_before_quit() { state->decoder_should_wait.wait(true); }
 };

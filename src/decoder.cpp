@@ -17,7 +17,6 @@
 */
 #include "decoder.hpp"
 
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -70,10 +69,7 @@ std::jthread Decoder::launch() {
                 packet = UniqueAVPacket(av_packet_alloc());
             } else {
                 state.close_connection();
-                while (!should_stop.stop_requested() && !state.is_seek()) {
-                    // TODO: make this blocking instead of polling
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
+                state.wait_before_quit();
             }
 
             while ((video || audio) && !should_stop.stop_requested() && state.waiting_for_packet_queue()) {
@@ -183,10 +179,7 @@ std::jthread Decoder::launch_video_decoder() {
                 }
 
                 state.close_connection();
-                while (!should_stop.stop_requested() && !state.is_seek()) {
-                    // TODO: make this blocking instead of polling
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
+                state.wait_before_quit();
             }
         }
     });
@@ -284,10 +277,7 @@ std::jthread Decoder::launch_audio_decoder() {
                 }
 
                 state.close_connection();
-                while (!should_stop.stop_requested() && !state.is_seek()) {
-                    // TODO: make this blocking instead of polling
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                }
+                state.wait_before_quit();
             }
         }
     });
