@@ -42,7 +42,6 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     Audio& self = *static_cast<Audio*>(user_data);
     T* buffer = static_cast<T*>(output_buffer);
 
-    int return_code = 0;
     auto start = std::chrono::steady_clock::now();
 
     const std::size_t needed = static_cast<std::size_t>(nbuffer_frames) *
@@ -69,7 +68,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
                         return 0;
                     }
 
-                    return_code = 1;  // closeStream
+                    // eof
                     break;
                 }
 
@@ -81,6 +80,9 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
                     return 0;
                 }
             }
+            // eof
+            // don't close stream
+            // audio still need to stay open to handle seek_req
             break;
         }
 
@@ -123,7 +125,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         self.queue<T>().clear();
     }
 
-    return return_code;
+    return 0;
 }
 
 Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format)
