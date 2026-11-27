@@ -129,15 +129,19 @@ class VideoState {
 
         old_state->seek_req.store(true);
 
+        // close all queue
+        old_state->video_frame_queue.close();
+        old_state->audio_frame_queue.close();
+        old_state->video_packet_queue.close();
+        old_state->audio_packet_queue.close();
+
+        // wake up decoder
         old_state->packet_queue_waker.store(true);
         old_state->packet_queue_waker.notify_one();
 
+        // wake up audio
         old_state->paused.store(false);
         old_state->audio_should_wait.store(false);
-        old_state->audio_should_wait.notify_one();
-
-        old_state->video_frame_queue.close();
-        old_state->audio_frame_queue.close();
     }
     bool is_audio_waiting() { return state->audio_should_wait.load(); }
     void audio_should_wait(bool flag) { state->audio_should_wait.store(flag); }
@@ -247,7 +251,6 @@ class DecoderState {
     bool is_seek() const { return state->seek_req.load(); }
     void handle_seek() {
         assert(is_seek());
-        close_connection();
         state = global_state.load();
     }
     int sub_decode_video_status() { return state->sub_decode_video_status.load(); }
@@ -281,7 +284,6 @@ class SubDecoderVideoState {
     bool is_seek() const { return state->seek_req.load(); }
     void handle_seek() {
         assert(is_seek());
-        close_connection();
         state = global_state.load();
     }
 };
@@ -313,7 +315,6 @@ class SubDecoderAudioState {
     bool is_seek() const { return state->seek_req.load(); }
     void handle_seek() {
         assert(is_seek());
-        close_connection();
         state = global_state.load();
     }
 };
