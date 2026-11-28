@@ -185,6 +185,14 @@ class VideoState {
     }
 };
 
+struct StateQuitGuard {
+    ~StateQuitGuard() {
+        VideoState s;
+        s.init();
+        s.quit();
+    }
+};
+
 inline void handle_no_window_play() {
     VideoState state;
     state.init();

@@ -104,6 +104,7 @@ int main(int argc, const char* argv[]) try {
         std::vector<std::jthread> threads;
         threads.push_back(decoder.launch());
 
+        StateQuitGuard guard;
         if (audio) audio->play();
         else threads.push_back(handle_no_audio_play());
         if (video) video->play();
