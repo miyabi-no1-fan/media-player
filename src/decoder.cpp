@@ -75,7 +75,8 @@ std::jthread Decoder::launch() {
                 state.wait_before_quit();
             }
 
-            while ((video || audio) && !state.should_quit() && state.waiting_for_packet_queue()) {
+            while ((video || audio) && !state.should_quit() &&
+                   state.waiting_for_packet_queue(video.has_value(), audio.has_value())) {
                 while (state.is_seek()) {
                     state.handle_seek();
                     std::int64_t ts = state.current_us() + start_time_us();
