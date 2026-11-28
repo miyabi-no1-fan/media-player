@@ -145,6 +145,8 @@ void Video::pause() {
 void Video::seek(std::int64_t target_us) {
     state.seek(target_us);
 
+    pending_frame = nullptr;
+
     // seek will re-open the queue, so we need to close it again
     if (!has_video) state.close_queue();
 }
