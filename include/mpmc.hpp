@@ -125,6 +125,7 @@ class MPMCQueue {
             std::lock_guard lock(mutex);
             closed = true;
         }
+        if (closed && queue.empty()) is_dead.notify_all();
         not_empty.notify_all();
         not_full.notify_all();
     }
