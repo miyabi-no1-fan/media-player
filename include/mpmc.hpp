@@ -34,7 +34,7 @@ class MPMCQueue {
     std::condition_variable not_full;   // signalled when space is available
     std::size_t bound = std::numeric_limits<decltype(bound)>::max();
     bool closed = false;
-    std::condition_variable close_signal;  // signalled when close()
+    std::condition_variable is_dead;  // signalled when queue is closed and drained
 
    public:
     MPMCQueue() = default;
@@ -73,6 +73,7 @@ class MPMCQueue {
         if (queue.empty()) return std::nullopt;
         T value = std::move(queue.front());
         queue.pop();
+        if (closed && queue.empty()) is_dead.notify_all();
         lock.unlock();
         not_full.notify_one();
         return value;
@@ -84,6 +85,7 @@ class MPMCQueue {
         if (queue.empty()) return std::nullopt;
         T value = std::move(queue.front());
         queue.pop();
+        if (closed && queue.empty()) is_dead.notify_all();
         lock.unlock();
         not_full.notify_one();
         return value;
@@ -97,6 +99,7 @@ class MPMCQueue {
         if (queue.empty()) return std::unexpected(static_cast<std::cv_status>(!status));
         T value = std::move(queue.front());
         queue.pop();
+        if (closed && queue.empty()) is_dead.notify_all();
         lock.unlock();
         not_full.notify_one();
         return value;
@@ -110,6 +113,7 @@ class MPMCQueue {
         if (queue.empty()) return std::unexpected(static_cast<std::cv_status>(!status));
         T value = std::move(queue.front());
         queue.pop();
+        if (closed && queue.empty()) is_dead.notify_all();
         lock.unlock();
         not_full.notify_one();
         return value;
@@ -123,13 +127,12 @@ class MPMCQueue {
         }
         not_empty.notify_all();
         not_full.notify_all();
-        close_signal.notify_all();
     }
 
-    // wait until the channels is closed
-    void wait_for_close() {
+    // wait until the channels is closed and drained
+    void wait_until_end() {
         std::unique_lock lock(mutex);
-        close_signal.wait(lock, [&] { return closed; });
+        is_dead.wait(lock, [&] { return closed && queue.empty(); });
     }
 
     bool is_closed() const {

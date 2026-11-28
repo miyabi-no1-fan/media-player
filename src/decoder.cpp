@@ -23,7 +23,6 @@
 #include <memory>
 #include <optional>
 #include <set>
-#include <stop_token>
 #include <string>
 #include <thread>
 #include <utility>
@@ -52,7 +51,7 @@ extern "C" {
 #include "state.hpp"
 
 std::jthread Decoder::launch() {
-    return std::jthread([this](std::stop_token should_stop) {
+    return std::jthread([this] {
         DecoderState state;
         state.init();
 
@@ -61,18 +60,22 @@ std::jthread Decoder::launch() {
         if (audio) audio_thrd = launch_audio_decoder();
 
         UniqueAVPacket packet(av_packet_alloc());
-        while ((video || audio) && !should_stop.stop_requested()) {
+        while ((video || audio) && !state.should_quit()) {
             if (av_read_frame(ictx, packet.get()) >= 0) {
-                if (false) std::unreachable();
-                else if (video && packet->stream_index == video->stream_index) state.send_video_packet(std::move(packet));
-                else if (audio && packet->stream_index == audio->stream_index) state.send_audio_packet(std::move(packet));
+                if (video && packet->stream_index == video->stream_index) {
+                    if (state.send_video_packet(std::move(packet)) != std::nullopt &&
+                        !state.is_seek() && !state.should_quit()) video = std::nullopt;
+                } else if (audio && packet->stream_index == audio->stream_index) {
+                    if (state.send_audio_packet(std::move(packet)) != std::nullopt &&
+                        !state.is_seek() && !state.should_quit()) audio = std::nullopt;
+                }
                 packet = UniqueAVPacket(av_packet_alloc());
             } else {
                 state.close_connection();
                 state.wait_before_quit();
             }
 
-            while ((video || audio) && !should_stop.stop_requested() && state.waiting_for_packet_queue()) {
+            while ((video || audio) && !state.should_quit() && state.waiting_for_packet_queue()) {
                 while (state.is_seek()) {
                     state.handle_seek();
                     std::int64_t ts = state.current_us() + start_time_us();
@@ -99,7 +102,7 @@ std::jthread Decoder::launch() {
 std::jthread Decoder::launch_video_decoder() {
     if (!video) return {};
 
-    return std::jthread([this](std::stop_token should_stop) {
+    return std::jthread([this] {
         const AVRational time_base = ictx->streams[video->stream_index]->time_base;
 
         SubDecoderVideoState state;
@@ -107,7 +110,7 @@ std::jthread Decoder::launch_video_decoder() {
         UniqueAVFrame decoded(av_frame_alloc());
         bool eof = false;
 
-        while (!should_stop.stop_requested()) {
+        while (!state.should_quit()) {
             if (auto packet = state.recv(); packet) TRY(avcodec_send_packet(video->decoder, packet->get()));
             else {
                 if (state.is_seek()) {
@@ -117,7 +120,11 @@ std::jthread Decoder::launch_video_decoder() {
                     eof = false;
                     continue;
                 }
-                if (should_stop.stop_requested()) return;
+
+                if (state.should_quit()) {
+                    return;
+                }
+
                 TRY(avcodec_send_packet(video->decoder, nullptr));
                 eof = true;
             }
@@ -150,7 +157,7 @@ std::jthread Decoder::launch_video_decoder() {
 
                 av_frame_unref(decoded.get());
                 if (state.is_seek()) break;
-                if (should_stop.stop_requested()) return;
+                if (state.should_quit()) return;
             }
 
             if (state.is_seek()) {
@@ -199,7 +206,7 @@ std::jthread Decoder::launch_video_decoder() {
 std::jthread Decoder::launch_audio_decoder() {
     if (!audio) return {};
 
-    return std::jthread([this](std::stop_token should_stop) {
+    return std::jthread([this] {
         const AVRational time_base = ictx->streams[audio->stream_index]->time_base;
 
         SubDecoderAudioState state;
@@ -207,7 +214,7 @@ std::jthread Decoder::launch_audio_decoder() {
         UniqueAVFrame decoded;
         bool eof = false;
 
-        while (!should_stop.stop_requested()) {
+        while (!state.should_quit()) {
             if (auto packet = state.recv(); packet) TRY(avcodec_send_packet(audio->decoder, packet->get()));
             else {
                 if (state.is_seek()) {
@@ -217,7 +224,11 @@ std::jthread Decoder::launch_audio_decoder() {
                     eof = false;
                     continue;
                 }
-                if (should_stop.stop_requested()) return;
+
+                if (state.should_quit()) {
+                    return;
+                }
+
                 TRY(avcodec_send_packet(audio->decoder, nullptr));
                 eof = true;
             }
@@ -250,7 +261,8 @@ std::jthread Decoder::launch_audio_decoder() {
                 }
 
                 av_frame_unref(decoded.get());
-                if (should_stop.stop_requested()) return;
+                if (state.is_seek()) break;
+                if (state.should_quit()) return;
             }
 
             if (state.is_seek()) {
@@ -272,7 +284,6 @@ std::jthread Decoder::launch_audio_decoder() {
                             if (state.is_seek()) break;
                             return;
                         }
-                        if (should_stop.stop_requested()) return;
                     }
                 }
 

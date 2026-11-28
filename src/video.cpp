@@ -53,7 +53,10 @@ void Video::play() {
     constexpr std::int64_t COOLDOWN = AV_TIME_BASE * 2 / 10;  // 0.2s
 
     while (render()) {
-        if (window.should_close()) std::quick_exit(0);
+        if (window.should_close()) {
+            state.quit();
+            return;
+        }
 
         {
             int key_space = glfwGetKey(w, GLFW_KEY_SPACE);
@@ -126,6 +129,7 @@ void Video::play() {
         key_cooldown_us = std::max(key_cooldown_us - frame_time_us, std::int64_t(0));
     }
 
+    state.wait_until_all_queue_ended();
     state.quit();
 }
 

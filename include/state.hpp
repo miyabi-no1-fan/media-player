@@ -24,7 +24,6 @@
 #include <expected>
 #include <memory>
 #include <optional>
-#include <stop_token>
 #include <thread>
 #include <utility>
 
@@ -60,19 +59,20 @@ class State {
     std::atomic_int64_t current_us = 0;
     std::atomic_bool paused = false;
     std::atomic_bool seek_req = false;
+    std::atomic_bool should_quit = false;
 
     // Video underrun will need audio to wait to catch up
     std::atomic_bool audio_should_wait = false;
 
     // before quit from eof, decoder will wait on this flag to handle seek_req
-    // for decoder, decoder_should_wait = false could mean should quit or a seek_req
+    // for decoder, decoder_should_wait = false could mean should_quit or a seek_req
     std::atomic_bool decoder_should_wait = true;
 
     // hold an AVERROR code if < 0
     std::atomic_int sub_decode_video_status = 0;
     std::atomic_int sub_decode_audio_status = 0;
 
-    // for audio and decoder, a failed send or recv could mean should quit or a seek_req
+    // for audio and decoder, a failed send or recv could mean should_quit or a seek_req
     MPMCQueue<UniqueAVPacket> video_packet_queue;
     MPMCQueue<UniqueAVPacket> audio_packet_queue;
     MPMCQueue<UniqueAVFrame> video_frame_queue{ VIDEO_FRAME_QUEUE_BOUND };
@@ -131,8 +131,7 @@ class VideoState {
         global_state.store(new_state);
 
         state->seek_req.store(true);
-        quit();
-
+        close_state();
         state = new_state;
     }
     bool is_audio_waiting() { return state->audio_should_wait.load(); }
@@ -148,18 +147,31 @@ class VideoState {
                state->video_packet_queue.empty() && state->video_packet_queue.is_closed() &&
                state->audio_packet_queue.empty() && state->audio_packet_queue.is_closed();
     }
-    void wait_until_all_queue_is_closed() {
-        state->video_frame_queue.wait_for_close();
-        state->audio_frame_queue.wait_for_close();
-        state->video_packet_queue.wait_for_close();
-        state->audio_packet_queue.wait_for_close();
+    void wait_until_all_queue_ended() {
+        state->video_frame_queue.close();
+        while (state->video_frame_queue.try_pop());
+        // state->video_frame_queue.wait_until_end();
+        state->audio_frame_queue.wait_until_end();
+        state->video_packet_queue.wait_until_end();
+        state->audio_packet_queue.wait_until_end();
     }
     void quit() {
+        state->should_quit.store(true);
+        close_state();
+    }
+
+   private:
+    void close_state() {
         // close all queue
         state->video_frame_queue.close();
         state->audio_frame_queue.close();
         state->video_packet_queue.close();
         state->audio_packet_queue.close();
+
+        // while (state->video_frame_queue.try_pop());
+        while (state->audio_frame_queue.try_pop());
+        while (state->video_packet_queue.try_pop());
+        while (state->audio_packet_queue.try_pop());
 
         // wake up decoder
         state->packet_queue_waker.store(true);
@@ -176,11 +188,8 @@ class VideoState {
 inline void handle_no_window_play() {
     VideoState state;
     state.init();
-    state.close_queue();
-    state.wait_until_all_queue_is_closed();
-    while (!state.has_all_queue_ended()) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
+    state.wait_until_all_queue_ended();
+    state.quit();
 }
 
 class AudioState {
@@ -205,17 +214,18 @@ class AudioState {
     std::expected<UniqueAVFrame, std::cv_status>
     recv_deadline(D&& deadline) { return state->audio_frame_queue.pop_deadline(deadline); }
     void close_queue() { state->audio_frame_queue.close(); }
+    bool should_quit() { return state->should_quit.load(); }
 };
 
 inline std::jthread handle_no_audio_play() {
-    return std::jthread([](std::stop_token should_stop) {
+    return std::jthread([] {
         using namespace std::chrono;
         microseconds step(1000);
         AudioState state;
         state.init();
         state.close_queue();
         time_point<steady_clock> next = steady_clock::now() + step;
-        while (!should_stop.stop_requested()) {
+        while (!state.should_quit()) {
             if (!state.is_paused()) {
                 state.next_current_us(step.count());
                 if (state.is_seek()) state.handle_seek();
@@ -265,6 +275,7 @@ class DecoderState {
     int sub_decode_video_status() { return state->sub_decode_video_status.load(); }
     int sub_decode_audio_status() { return state->sub_decode_audio_status.load(); }
     void wait_before_quit() { state->decoder_should_wait.wait(true); }
+    bool should_quit() { return state->should_quit.load(); }
 };
 
 class SubDecoderVideoState {
@@ -297,6 +308,7 @@ class SubDecoderVideoState {
         state = global_state.load();
     }
     void wait_before_quit() { state->decoder_should_wait.wait(true); }
+    bool should_quit() { return state->should_quit.load(); }
 };
 
 class SubDecoderAudioState {
@@ -329,4 +341,5 @@ class SubDecoderAudioState {
         state = global_state.load();
     }
     void wait_before_quit() { state->decoder_should_wait.wait(true); }
+    bool should_quit() { return state->should_quit.load(); }
 };

@@ -110,11 +110,7 @@ int main(int argc, const char* argv[]) try {
         if (video) video->play();
         else handle_no_window_play();
 
-        // we need Decoder to stop before Audio
-        for (auto&& thread : threads) {
-            thread.request_stop();
-            thread.join();
-        }
+        if (video && video->should_close()) break;
     }
 
     return 0;

@@ -42,6 +42,8 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
     Audio& self = *static_cast<Audio*>(user_data);
     T* buffer = static_cast<T*>(output_buffer);
 
+    int return_code = 0;
+
     auto start = std::chrono::steady_clock::now();
 
     const std::size_t needed = static_cast<std::size_t>(nbuffer_frames) *
@@ -60,30 +62,29 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         auto res = self.state.recv_deadline(deadline);
 
         if (!res) {
-            switch (res.error()) {
-                case std::cv_status::no_timeout: {
-                    if (self.state.is_seek()) {
-                        self.state.handle_seek();
-                        self.queue<T>().clear();
-                        return 0;
-                    }
-
-                    // eof
-                    break;
+            if (res.error() == std::cv_status::timeout) {
+                // each full queue match with its sample_time_us
+                // we don't play partial filled queue
+                // exccept for the closed queue case
+                std::memset(buffer, 0, needed * sizeof(T));
+                return 0;
+            } else {
+                if (self.state.is_seek()) {
+                    self.state.handle_seek();
+                    self.queue<T>().clear();
+                    continue;
                 }
 
-                case std::cv_status::timeout: {
-                    // each full queue match with its sample_time_us
-                    // we don't play partial filled queue
-                    // exccept for the closed queue case
-                    std::memset(buffer, 0, needed * sizeof(T));
-                    return 0;
+                if (self.state.should_quit()) {
+                    return_code = 1;  // stopStream
                 }
+
+                // it's possible that video might send another seek_req
+                // so we don't stopStream unless video ask for it
+
+                // flush queue
+                break;
             }
-            // eof
-            // don't close stream
-            // audio still need to stay open to handle seek_req
-            break;
         }
 
         auto& frame = res.value();
@@ -125,7 +126,7 @@ int Audio::callback(void* output_buffer, void*, unsigned int nbuffer_frames,
         self.queue<T>().clear();
     }
 
-    return 0;
+    return return_code;
 }
 
 Audio::Audio(unsigned int channels, unsigned int sample_rate, RtAudioFormat sample_format)

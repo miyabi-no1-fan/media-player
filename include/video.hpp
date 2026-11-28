@@ -75,6 +75,7 @@ class Video {
     std::size_t size() const { return height * row_stride(); }
 
     void play();
+    bool should_close() { return window.should_close(); }
 
    private:
     bool render();
