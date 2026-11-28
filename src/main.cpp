@@ -77,10 +77,6 @@ int main(int argc, const char* argv[]) try {
             info.no_window) decoder.no_video();
         if (info.no_audio) decoder.no_audio();
 
-        std::vector<std::jthread> threads;
-
-        threads.push_back(decoder.launch());
-
         std::unique_ptr<Audio> audio = nullptr;
 
         if (decoder.has_audio()) {
@@ -104,6 +100,9 @@ int main(int argc, const char* argv[]) try {
                     "media-player: " + info.path);
             }
         }
+
+        std::vector<std::jthread> threads;
+        threads.push_back(decoder.launch());
 
         if (audio) audio->play();
         else threads.push_back(handle_no_audio_play());
