@@ -224,11 +224,16 @@ inline std::jthread handle_no_audio_play() {
         AudioState state;
         state.init();
         state.close_queue();
+        while (state.recv());
         time_point<steady_clock> next = steady_clock::now() + step;
         while (!state.should_quit()) {
             if (!state.is_paused()) {
                 state.next_current_us(step.count());
-                if (state.is_seek()) state.handle_seek();
+                if (state.is_seek()) {
+                    state.handle_seek();
+                    state.close_queue();
+                    while (state.recv());
+                }
             }
 
             std::this_thread::sleep_until(next);
