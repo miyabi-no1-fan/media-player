@@ -164,13 +164,13 @@ bool Video::render() {
                 auto res = state.recv_deadline(deadline);
 
                 if (!res) {
-                    switch (res.error()) {
-                        case std::cv_status::no_timeout: return false;  // eof
-                        case std::cv_status::timeout: break;            // timeout
+                    if (res.error() == std::cv_status::timeout) {
+                        state.audio_should_wait(true);
+                        break;
+                    } else {
+                        state.audio_should_wait(false);
+                        return false;
                     }
-                    // timeout
-                    state.audio_should_wait(true);
-                    break;
                 }
 
                 frame = std::move(res.value());
